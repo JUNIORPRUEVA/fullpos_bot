@@ -9,12 +9,12 @@ export interface EvolutionMedia {
 export class WhatsAppService {
   constructor(private config: { baseUrl: string; apiKey: string; instance: string }) {}
 
-  async sendText(remoteJid: string, text: string, instance: string): Promise<void> {
+  async sendText(remoteJid: string, text: string, instance: string): Promise<any> {
     if (!this.config.baseUrl || !this.config.apiKey) {
-      return;
+      return null;
     }
 
-    await axios.post(`${this.config.baseUrl}/message/sendText/${instance}`, {
+    const response = await axios.post(`${this.config.baseUrl}/message/sendText/${instance}`, {
       number: remoteJid.replace(/@s\.whatsapp\.net$/, ''),
       text,
     }, {
@@ -22,6 +22,8 @@ export class WhatsAppService {
         apikey: this.config.apiKey,
       },
     });
+
+    return response.data;
   }
 
   async sendAudio(remoteJid: string, audioBase64: string, instance: string, delay = 1200): Promise<void> {
@@ -124,5 +126,70 @@ export class WhatsAppService {
     });
 
     return response.data;
+  }
+
+  async restartInstance(instance: string): Promise<any> {
+    const response = await axios.post(`${this.config.baseUrl}/instance/restart/${instance}`, {}, {
+      headers: {
+        apikey: this.config.apiKey,
+      },
+      timeout: 20000,
+    });
+
+    return response.data;
+  }
+
+  async connectInstance(instance: string): Promise<any> {
+    const response = await axios.get(`${this.config.baseUrl}/instance/connect/${instance}`, {
+      headers: {
+        apikey: this.config.apiKey,
+      },
+      timeout: 15000,
+    });
+
+    return response.data;
+  }
+
+  async fetchInstance(instance: string): Promise<any> {
+    const response = await axios.get(`${this.config.baseUrl}/instance/fetchInstances`, {
+      headers: {
+        apikey: this.config.apiKey,
+      },
+      timeout: 10000,
+    });
+
+    return Array.isArray(response.data)
+      ? response.data.find((item) => item.name === instance)
+      : null;
+  }
+
+  async findMessages(instance: string, remoteJid?: string, limit = 10): Promise<any[]> {
+    const response = await axios.post(`${this.config.baseUrl}/chat/findMessages/${instance}`, {
+      where: remoteJid ? { key: { remoteJid } } : {},
+      limit,
+    }, {
+      headers: {
+        apikey: this.config.apiKey,
+      },
+      timeout: 10000,
+    });
+
+    return response.data?.messages?.records || [];
+  }
+
+  async waitForMessageUpdate(instance: string, messageId: string, remoteJid: string, timeoutMs = 15000): Promise<any> {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const records = await this.findMessages(instance, remoteJid, 8);
+      const match = records.find((record) => record?.key?.id === messageId);
+      if (match?.MessageUpdate?.length) {
+        return match;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+
+    const records = await this.findMessages(instance, remoteJid, 8);
+    return records.find((record) => record?.key?.id === messageId) || null;
   }
 }

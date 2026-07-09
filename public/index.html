@@ -98,6 +98,7 @@
       }
 
       button.secondary { background: var(--accent-2); }
+      button.danger { background: var(--danger); }
       button.ghost {
         background: #eef2f7;
         color: #1e293b;
@@ -228,7 +229,7 @@
         </div>
 
         <div>
-          <h2>Prueba Rápida</h2>
+          <h2>Prueba Rápida Del Agente</h2>
           <form id="test-form" class="grid">
             <div>
               <label>Teléfono</label>
@@ -243,6 +244,26 @@
             <button type="submit" form="test-form" class="secondary">Probar Respuesta</button>
           </div>
           <div id="test-result" class="status" style="display:none; margin-top: 14px;"></div>
+        </div>
+
+        <div>
+          <h2>Prueba Real De WhatsApp</h2>
+          <form id="send-form" class="grid">
+            <div>
+              <label>Teléfono destino</label>
+              <input id="sendPhone" placeholder="18295344286" />
+            </div>
+            <div>
+              <label>Mensaje real</label>
+              <input id="sendMessage" placeholder="Hola, prueba FullPOS" />
+            </div>
+          </form>
+          <div class="actions">
+            <button type="submit" form="send-form" class="secondary">Enviar Y Verificar</button>
+            <button id="restart-instance" class="ghost" type="button">Reiniciar Instancia</button>
+            <button id="connect-instance" class="ghost" type="button">Ver Conexión / QR</button>
+          </div>
+          <div id="send-result" class="status" style="display:none; margin-top: 14px;"></div>
         </div>
       </section>
 
@@ -267,6 +288,7 @@
       const statusBox = document.getElementById('status');
       const pill = document.getElementById('health-pill');
       const testResult = document.getElementById('test-result');
+      const sendResult = document.getElementById('send-result');
 
       function setStatus(text) {
         statusBox.textContent = text;
@@ -287,10 +309,17 @@
           const res = await fetch('/status');
           const data = await res.json();
           const state = data.whatsapp?.instance?.state || data.whatsapp?.state || 'desconocido';
+          const conflict = data.instance?.disconnectionObject || '';
           pill.textContent = data.ok ? 'Operativo' : 'Revisar';
-          pill.style.background = data.ok ? '#dcfce7' : '#fee2e2';
-          pill.style.color = data.ok ? '#166534' : '#991b1b';
-          setStatus(`WhatsApp: ${state}\nAuto-respuesta: ${data.config?.autoReplyEnabled ? 'activa' : 'pausada'}\nModo: ${data.config?.responseMode || 'auto'}\nWebhook: ${data.config?.webhookUrl || ''}`);
+          pill.style.background = data.ok && !conflict.includes('device_removed') ? '#dcfce7' : '#fee2e2';
+          pill.style.color = data.ok && !conflict.includes('device_removed') ? '#166534' : '#991b1b';
+          setStatus(`WhatsApp: ${state}
+Auto-respuesta: ${data.config?.autoReplyEnabled ? 'activa' : 'pausada'}
+Modo: ${data.config?.responseMode || 'auto'}
+Número: ${data.instance?.number || ''}
+Perfil: ${data.instance?.profileName || ''}
+Conflicto: ${conflict.includes('device_removed') ? 'device_removed: necesita revincular QR' : 'no detectado'}
+Webhook: ${data.config?.webhookUrl || ''}`);
         } catch (error) {
           pill.textContent = 'Sin conexión';
           pill.style.background = '#fee2e2';
@@ -341,6 +370,41 @@
         });
         const data = await res.json();
         testResult.textContent = data.ok ? data.respuesta : `Error: ${data.error}`;
+      });
+
+      document.getElementById('send-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        sendResult.style.display = 'block';
+        sendResult.textContent = 'Enviando por WhatsApp y verificando entrega...';
+        const res = await fetch('/whatsapp/send-test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            telefono: document.getElementById('sendPhone').value.trim(),
+            mensaje: document.getElementById('sendMessage').value.trim(),
+          }),
+        });
+        const data = await res.json();
+        sendResult.textContent = JSON.stringify(data, null, 2);
+        await loadStatus();
+      });
+
+      document.getElementById('restart-instance').addEventListener('click', async () => {
+        sendResult.style.display = 'block';
+        sendResult.textContent = 'Reiniciando instancia...';
+        const res = await fetch('/evolution/restart', { method: 'POST' });
+        const data = await res.json();
+        sendResult.textContent = JSON.stringify(data, null, 2);
+        setTimeout(loadStatus, 3000);
+      });
+
+      document.getElementById('connect-instance').addEventListener('click', async () => {
+        sendResult.style.display = 'block';
+        sendResult.textContent = 'Consultando conexión...';
+        const res = await fetch('/evolution/connect');
+        const data = await res.json();
+        sendResult.textContent = JSON.stringify(data, null, 2);
+        await loadStatus();
       });
 
       loadConfig().then(loadStatus);

@@ -114,14 +114,86 @@ app.get('/status', async (_req, res) => {
   try {
     const config = configService.get();
     const state = await whatsapp.getConnectionState(config.whatsappInstance);
+    const instance = await whatsapp.fetchInstance(config.whatsappInstance);
     res.json({
       ok: true,
       service: 'fullpos-agente-bot',
       config,
       whatsapp: state,
+      instance: instance ? {
+        name: instance.name,
+        connectionStatus: instance.connectionStatus,
+        ownerJid: instance.ownerJid,
+        profileName: instance.profileName,
+        number: instance.number,
+        disconnectionReasonCode: instance.disconnectionReasonCode,
+        disconnectionObject: instance.disconnectionObject,
+      } : null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'error_status';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.post('/evolution/restart', async (_req, res) => {
+  try {
+    const config = configService.get();
+    const data = await whatsapp.restartInstance(config.whatsappInstance);
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_reiniciando_instancia';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.get('/evolution/connect', async (_req, res) => {
+  try {
+    const config = configService.get();
+    const data = await whatsapp.connectInstance(config.whatsappInstance);
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_obteniendo_conexion';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.post('/whatsapp/send-test', async (req, res) => {
+  try {
+    const config = configService.get();
+    const telefono = String(req.body?.telefono || '').trim();
+    const mensaje = String(req.body?.mensaje || 'Prueba FullPOS desde panel.').trim();
+
+    if (!telefono) {
+      return res.status(400).json({ ok: false, error: 'telefono requerido' });
+    }
+
+    const remoteJid = telefono.includes('@') ? telefono : `${telefono.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+    const sendData = await whatsapp.sendText(remoteJid, mensaje, config.whatsappInstance);
+    const messageId = sendData?.key?.id || '';
+    const record = messageId
+      ? await whatsapp.waitForMessageUpdate(config.whatsappInstance, messageId, sendData?.key?.remoteJid || remoteJid)
+      : null;
+    const updates = record?.MessageUpdate || [];
+    const lastStatus = updates.at(-1)?.status || sendData?.status || 'PENDING';
+
+    res.json({
+      ok: true,
+      sentToApi: true,
+      messageId,
+      remoteJid: sendData?.key?.remoteJid || remoteJid,
+      initialStatus: sendData?.status,
+      deliveryStatus: lastStatus,
+      delivered: ['SERVER_ACK', 'DELIVERY_ACK', 'READ'].includes(lastStatus),
+      updates,
+      record: record ? {
+        messageTimestamp: record.messageTimestamp,
+        messageType: record.messageType,
+        text: record.message?.conversation || '',
+      } : null,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_enviando_prueba';
     res.status(500).json({ ok: false, error: message });
   }
 });
