@@ -209,21 +209,31 @@ app.post('/webhook', async (req, res) => {
 
     const agentReply = await openai.generateAgentReply(context);
     const responseText = agentReply?.client_response || 'Gracias por tu mensaje.';
+    let sent = false;
+    let sendError = '';
 
     if (config.autoReplyEnabled) {
-      await wait(Number(config.humanDelayMs || 0));
-      const shouldReplyWithAudio = config.responseMode === 'audio' || (config.responseMode === 'auto' && tipoMensaje === 'audio');
-      if (shouldReplyWithAudio) {
-        try {
-          const audioBase64 = await openai.generateSpeechBase64(responseText, config.ttsVoice);
-          await whatsapp.sendAudio(targetNumber, audioBase64, instance, Number(config.humanDelayMs || 1200));
-        } catch (error) {
-          const audioError = error instanceof Error ? error.message : 'error_audio_respuesta';
-          console.warn(`No se pudo enviar audio, enviando texto: ${audioError}`);
+      try {
+        await wait(Number(config.humanDelayMs || 0));
+        const shouldReplyWithAudio = config.responseMode === 'audio' || (config.responseMode === 'auto' && tipoMensaje === 'audio');
+        if (shouldReplyWithAudio) {
+          try {
+            const audioBase64 = await openai.generateSpeechBase64(responseText, config.ttsVoice);
+            await whatsapp.sendAudio(targetNumber, audioBase64, instance, Number(config.humanDelayMs || 1200));
+            sent = true;
+          } catch (error) {
+            const audioError = error instanceof Error ? error.message : 'error_audio_respuesta';
+            console.warn(`No se pudo enviar audio, enviando texto: ${audioError}`);
+            await whatsapp.sendText(targetNumber, responseText, instance);
+            sent = true;
+          }
+        } else {
           await whatsapp.sendText(targetNumber, responseText, instance);
+          sent = true;
         }
-      } else {
-        await whatsapp.sendText(targetNumber, responseText, instance);
+      } catch (error) {
+        sendError = error instanceof Error ? error.message : 'error_envio_whatsapp';
+        console.warn(`No se pudo enviar respuesta por WhatsApp: ${sendError}`);
       }
     }
 
@@ -231,7 +241,7 @@ app.post('/webhook', async (req, res) => {
     await redis.pushJson(memoryKey, { role: 'assistant', text: responseText, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
 
     const signature = createHash('sha256').update(`${remoteJid}:${responseText}`).digest('hex');
-    return res.json({ ok: true, signature, response: responseText, agent: agentReply });
+    return res.json({ ok: true, signature, response: responseText, agent: agentReply, sent, sendError: sendError || undefined });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'error_desconocido';
     return res.status(500).json({ ok: false, error: message });
