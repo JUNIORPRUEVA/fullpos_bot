@@ -10,6 +10,12 @@ export class OpenAIService {
     this.model = model;
   }
 
+  setModel(model: string): void {
+    if (model.trim()) {
+      this.model = model.trim();
+    }
+  }
+
   async generateAgentReply(context: any): Promise<any> {
     if (!this.client.apiKey) {
       return {

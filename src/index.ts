@@ -111,6 +111,7 @@ app.post('/webhook', async (req, res) => {
     }
 
     const config = configService.get();
+    openai.setModel(config.openaiModel);
     const fromMe = key?.fromMe === true;
     const tipoMensaje = getMessageType(message);
     const pauseKey = `pause:${remoteJid}`;
@@ -210,6 +211,7 @@ app.post('/test-message', async (req, res) => {
     }
 
     const config = configService.get();
+    openai.setModel(config.openaiModel);
     const context = {
       mensaje: mensaje,
       tipo_mensaje: 'text',
