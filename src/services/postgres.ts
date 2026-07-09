@@ -19,6 +19,12 @@ export class PostgresService {
         [`%${phone}%`],
       );
       return result.rows[0] || null;
+    } catch (error) {
+      if (this.isMissingTable(error)) {
+        console.warn('Postgres customers table is missing; continuing without customer context.');
+        return null;
+      }
+      throw error;
     } finally {
       client.release();
     }
@@ -34,8 +40,21 @@ export class PostgresService {
         [customerId],
       );
       return result.rows;
+    } catch (error) {
+      if (this.isMissingTable(error)) {
+        console.warn('Postgres licenses table is missing; continuing without license context.');
+        return [];
+      }
+      throw error;
     } finally {
       client.release();
     }
+  }
+
+  private isMissingTable(error: unknown): boolean {
+    return typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && (error as { code?: string }).code === '42P01';
   }
 }
