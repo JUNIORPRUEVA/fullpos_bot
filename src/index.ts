@@ -24,6 +24,40 @@ const whatsapp = new WhatsAppService({
   instance: process.env.WHATSAPP_INSTANCE || 'apyra',
 });
 
+function getMessageText(message: any): string {
+  return String(
+    message?.conversation
+    || message?.extendedTextMessage?.text
+    || message?.imageMessage?.caption
+    || message?.videoMessage?.caption
+    || '',
+  ).trim();
+}
+
+function getMessageType(message: any): string {
+  if (message?.locationMessage) return 'ubicacion';
+  if (message?.audioMessage) return 'audio';
+  if (message?.imageMessage) return 'image';
+  if (message?.videoMessage) return 'video';
+  if (getMessageText(message)) return 'text';
+  return 'unknown';
+}
+
+function getLocationText(message: any): string {
+  const location = message?.locationMessage;
+  if (!location) return '';
+  const lat = location.degreesLatitude || location.latitude || '';
+  const lng = location.degreesLongitude || location.longitude || '';
+  const label = location.name || location.address || '';
+  const maps = lat && lng ? `https://www.google.com/maps?q=${lat},${lng}` : '';
+  return [label, maps].filter(Boolean).join(' | ');
+}
+
+async function wait(ms: number): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 app.get('/config', (_req, res) => {
   res.json(configService.get());
 });
@@ -34,6 +68,33 @@ app.post('/config', (req, res) => {
     res.json(updated);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'error_actualizando_config';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.post('/connect-webhook', async (_req, res) => {
+  try {
+    const config = configService.get();
+    const data = await whatsapp.configureWebhook(config.whatsappInstance, config.webhookUrl);
+    res.json({ ok: true, webhookUrl: config.webhookUrl, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_conectando_webhook';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.get('/status', async (_req, res) => {
+  try {
+    const config = configService.get();
+    const state = await whatsapp.getConnectionState(config.whatsappInstance);
+    res.json({
+      ok: true,
+      service: 'fullpos-agente-bot',
+      config,
+      whatsapp: state,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_status';
     res.status(500).json({ ok: false, error: message });
   }
 });
@@ -49,17 +110,16 @@ app.post('/webhook', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'payload_invalido' });
     }
 
+    const config = configService.get();
     const fromMe = key?.fromMe === true;
-    const hasText = Boolean(message?.conversation);
-    const hasImage = Boolean(message?.imageMessage);
-    const hasAudio = Boolean(message?.audioMessage);
-    const hasLocation = Boolean(message?.locationMessage);
-
-    const tipoMensaje = hasLocation ? 'ubicacion' : hasAudio ? 'audio' : hasImage ? 'image' : 'text';
+    const tipoMensaje = getMessageType(message);
     const pauseKey = `pause:${remoteJid}`;
+    const memoryKey = `memory:${remoteJid}`;
+    const instance = body?.instance || config.whatsappInstance || process.env.WHATSAPP_INSTANCE || 'apyra';
 
-    if (fromMe && (hasText || hasImage || hasAudio)) {
-      await redis.set(pauseKey, '1', 900);
+    if (fromMe && tipoMensaje !== 'unknown') {
+      await redis.set(pauseKey, '1', Math.max(60, Number(config.pauseMinutes || 15) * 60));
+      return res.json({ ok: true, skipped: true, reason: 'mensaje_humano_pausa_activada' });
     }
 
     const pauseActive = await redis.get(pauseKey);
@@ -70,34 +130,68 @@ app.post('/webhook', async (req, res) => {
     const normalizedPhone = String(remoteJid || '').replace(/@.*/, '').replace(/[^0-9]/g, '');
     const customer = await postgres.getCustomerByPhone(normalizedPhone);
     const licenses = await postgres.getLicensesByCustomer(customer?.id || '');
-
-    const config = configService.get();
     const targetNumber = config.destinationNumber || remoteJid;
+    let userMessage = getMessageText(message);
+
+    if (tipoMensaje === 'ubicacion') {
+      userMessage = getLocationText(message) || 'El cliente envio una ubicacion.';
+    }
+
+    if ((tipoMensaje === 'audio' || tipoMensaje === 'image') && key?.id) {
+      try {
+        const media = await whatsapp.fetchMediaBase64(key.id, instance);
+        if (media?.base64 && tipoMensaje === 'audio') {
+          userMessage = await openai.transcribeAudio(media);
+        }
+        if (media?.base64 && tipoMensaje === 'image') {
+          userMessage = await openai.analyzeImage(media, userMessage);
+        }
+      } catch (error) {
+        const mediaError = error instanceof Error ? error.message : 'error_media';
+        console.warn(`No se pudo procesar media: ${mediaError}`);
+      }
+    }
+
+    if (!userMessage) {
+      return res.json({ ok: true, skipped: true, reason: 'mensaje_sin_contenido_util' });
+    }
+
+    const history = await redis.getJsonList(memoryKey, 10);
 
     const context = {
-      mensaje: message?.conversation || '',
+      mensaje: userMessage,
       tipo_mensaje: tipoMensaje,
       telefono: remoteJid,
-      instancia: body?.instance || process.env.WHATSAPP_INSTANCE || 'apyra',
+      instancia: instance,
       cliente: customer,
       licencias: licenses,
       contexto_comercial: {
         negocio: customer?.nombre_negocio || '',
         estado: customer ? 'registered' : 'unknown',
       },
-      historial: [],
+      historial: history,
       recursos: [],
+      config: {
+        businessName: config.businessName,
+        businessSummary: config.businessSummary,
+        responseStyle: config.responseStyle,
+        maxResponseChars: config.maxResponseChars,
+      },
     };
 
     const agentReply = await openai.generateAgentReply(context);
     const responseText = agentReply?.client_response || 'Gracias por tu mensaje.';
 
     if (config.autoReplyEnabled) {
-      await whatsapp.sendText(targetNumber, responseText, body?.instance || config.whatsappInstance || process.env.WHATSAPP_INSTANCE || 'apyra');
+      await wait(Number(config.humanDelayMs || 0));
+      await whatsapp.sendText(targetNumber, responseText, instance);
     }
 
+    await redis.pushJson(memoryKey, { role: 'user', text: userMessage, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
+    await redis.pushJson(memoryKey, { role: 'assistant', text: responseText, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
+
     const signature = createHash('sha256').update(`${remoteJid}:${responseText}`).digest('hex');
-    return res.json({ ok: true, signature, response: responseText });
+    return res.json({ ok: true, signature, response: responseText, agent: agentReply });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'error_desconocido';
     return res.status(500).json({ ok: false, error: message });
@@ -115,6 +209,7 @@ app.post('/test-message', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'telefono y mensaje requeridos' });
     }
 
+    const config = configService.get();
     const context = {
       mensaje: mensaje,
       tipo_mensaje: 'text',
@@ -122,6 +217,13 @@ app.post('/test-message', async (req, res) => {
       cliente: null,
       licencias: [],
       contexto_comercial: { negocio: 'desconocido', estado: 'unknown' },
+      historial: [],
+      config: {
+        businessName: config.businessName,
+        businessSummary: config.businessSummary,
+        responseStyle: config.responseStyle,
+        maxResponseChars: config.maxResponseChars,
+      },
     };
 
     const agentReply = await openai.generateAgentReply(context);

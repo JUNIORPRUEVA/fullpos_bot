@@ -3,147 +3,329 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FullPOS Bot Config</title>
+    <title>FullPOS Agent Console</title>
     <style>
-      body { font-family: Arial, sans-serif; margin: 0; background: #0f172a; color: #f8fafc; }
-      .container { max-width: 760px; margin: 40px auto; padding: 24px; background: #111827; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
-      h1 { margin-top: 0; }
-      label { display: block; margin-top: 14px; font-weight: 600; }
-      input, select { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #334155; margin-top: 6px; background: #0f172a; color: white; }
-      button { margin-top: 20px; padding: 10px 16px; border: none; border-radius: 10px; cursor: pointer; background: #22c55e; color: white; font-weight: 700; }
-      .status { margin-top: 16px; padding: 10px; border-radius: 10px; background: #1e293b; }
-      .small { font-size: 0.9rem; color: #94a3b8; }
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --ink: #152033;
+        --muted: #64748b;
+        --line: #d8dee9;
+        --accent: #0f766e;
+        --accent-2: #2563eb;
+        --danger: #b42318;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+      }
+
+      header {
+        border-bottom: 1px solid var(--line);
+        background: #fff;
+      }
+
+      .wrap {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 22px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      h1, h2 { margin: 0; letter-spacing: 0; }
+      h1 { font-size: 24px; }
+      h2 { font-size: 17px; margin-bottom: 14px; }
+      p { color: var(--muted); margin: 6px 0 0; }
+
+      main.wrap {
+        display: grid;
+        grid-template-columns: 1fr 360px;
+        gap: 18px;
+      }
+
+      section, aside {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      label {
+        display: block;
+        font-size: 13px;
+        font-weight: 700;
+        color: #334155;
+        margin-bottom: 6px;
+      }
+
+      input, select, textarea {
+        width: 100%;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 10px 11px;
+        color: var(--ink);
+        background: #fff;
+        font: inherit;
+      }
+
+      textarea { min-height: 92px; resize: vertical; }
+
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 10px 13px;
+        font-weight: 800;
+        cursor: pointer;
+        background: var(--accent);
+        color: white;
+      }
+
+      button.secondary { background: var(--accent-2); }
+      button.ghost {
+        background: #eef2f7;
+        color: #1e293b;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .status {
+        padding: 12px;
+        border-radius: 6px;
+        background: #f8fafc;
+        border: 1px solid var(--line);
+        color: #334155;
+        white-space: pre-wrap;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        border-radius: 999px;
+        padding: 4px 10px;
+        background: #dcfce7;
+        color: #166534;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .stack { display: grid; gap: 16px; }
+      .span-2 { grid-column: span 2; }
+      .muted { color: var(--muted); font-size: 13px; }
+
+      @media (max-width: 860px) {
+        main.wrap, .grid { grid-template-columns: 1fr; }
+        .span-2 { grid-column: span 1; }
+        .topbar { align-items: flex-start; flex-direction: column; }
+      }
     </style>
   </head>
   <body>
-    <div class="container">
-      <h1>Configuración básica del bot</h1>
-      <p class="small">Administra los valores más importantes para que el bot responda y envíe mensajes correctamente.</p>
+    <header>
+      <div class="wrap topbar">
+        <div>
+          <h1>FullPOS Agent Console</h1>
+          <p>Agente propio para WhatsApp, sin n8n.</p>
+        </div>
+        <span id="health-pill" class="pill">Verificando...</span>
+      </div>
+    </header>
 
-      <form id="config-form">
-        <label>Numero de destino</label>
-        <input id="destinationNumber" name="destinationNumber" placeholder="Ej. 18095551234 o 18095551234@s.whatsapp.net" />
+    <main class="wrap">
+      <section class="stack">
+        <div>
+          <h2>Configuración Del Agente</h2>
+          <form id="config-form" class="grid">
+            <div>
+              <label>Número de destino fijo</label>
+              <input id="destinationNumber" placeholder="Vacío = responder al cliente" />
+            </div>
+            <div>
+              <label>Instancia WhatsApp</label>
+              <input id="whatsappInstance" placeholder="apyra" />
+            </div>
+            <div>
+              <label>Modelo OpenAI</label>
+              <input id="openaiModel" placeholder="gpt-4o, gpt-5.5..." />
+            </div>
+            <div>
+              <label>Respuestas automáticas</label>
+              <select id="autoReplyEnabled">
+                <option value="true">Activadas</option>
+                <option value="false">Desactivadas</option>
+              </select>
+            </div>
+            <div>
+              <label>Pausa cuando responde humano</label>
+              <input id="pauseMinutes" type="number" min="1" max="240" />
+            </div>
+            <div>
+              <label>Espera humana antes de responder</label>
+              <input id="humanDelayMs" type="number" min="0" max="10000" step="100" />
+            </div>
+            <div>
+              <label>Nombre comercial</label>
+              <input id="businessName" />
+            </div>
+            <div>
+              <label>Máximo de caracteres</label>
+              <input id="maxResponseChars" type="number" min="120" max="1200" />
+            </div>
+            <div class="span-2">
+              <label>Resumen del negocio</label>
+              <textarea id="businessSummary"></textarea>
+            </div>
+            <div class="span-2">
+              <label>Webhook del bot</label>
+              <input id="webhookUrl" />
+            </div>
+          </form>
+          <div class="actions">
+            <button type="submit" form="config-form">Guardar</button>
+            <button id="connect-webhook" class="secondary" type="button">Conectar Evolution</button>
+            <button id="refresh-status" class="ghost" type="button">Actualizar Estado</button>
+          </div>
+        </div>
 
-        <label>Instancia de WhatsApp</label>
-        <input id="whatsappInstance" name="whatsappInstance" placeholder="Ej. apyra" />
+        <div>
+          <h2>Prueba Rápida</h2>
+          <form id="test-form" class="grid">
+            <div>
+              <label>Teléfono</label>
+              <input id="testPhone" placeholder="18494314070" />
+            </div>
+            <div>
+              <label>Mensaje</label>
+              <input id="testMessage" placeholder="Quiero una demo de FullPOS" />
+            </div>
+          </form>
+          <div class="actions">
+            <button type="submit" form="test-form" class="secondary">Probar Respuesta</button>
+          </div>
+          <div id="test-result" class="status" style="display:none; margin-top: 14px;"></div>
+        </div>
+      </section>
 
-        <label>Modelo OpenAI</label>
-        <input id="openaiModel" name="openaiModel" placeholder="Ej. gpt-4o" />
-
-        <label>Respuestas automáticas</label>
-        <select id="autoReplyEnabled" name="autoReplyEnabled">
-          <option value="true">Activadas</option>
-          <option value="false">Desactivadas</option>
-        </select>
-
-        <label>Pausa del bot (minutos)</label>
-        <input id="pauseMinutes" name="pauseMinutes" type="number" min="1" max="60" />
-
-        <button type="submit">Guardar configuración</button>
-      </form>
-
-      <div id="status" class="status">Cargando configuración...</div>
-
-      <hr style="margin: 30px 0; border: none; border-top: 1px solid #334155;" />
-
-      <h2>Prueba rápida del agente</h2>
-      <p class="small">Envía un mensaje de prueba para ver cómo responde el agente sin necesidad de WhatsApp.</p>
-
-      <form id="test-form">
-        <label>Teléfono (para el contexto)</label>
-        <input id="testPhone" name="testPhone" placeholder="Ej. 18095551234" />
-
-        <label>Mensaje a enviar</label>
-        <textarea id="testMessage" name="testMessage" placeholder="Ej. Quiero probar FullPOS" style="width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #334155; margin-top: 6px; background: #0f172a; color: white; min-height: 80px;"></textarea>
-
-        <button type="submit" style="background: #3b82f6;">Probar agente</button>
-      </form>
-
-      <div id="test-result" style="margin-top: 16px; display: none; padding: 10px; border-radius: 10px; background: #1e293b; border-left: 4px solid #3b82f6;"></div>
-    </div>
+      <aside class="stack">
+        <div>
+          <h2>Estado</h2>
+          <div id="status" class="status">Cargando...</div>
+        </div>
+        <div>
+          <h2>Operación</h2>
+          <p class="muted">El bot responde mensajes entrantes de Evolution, usa memoria corta por conversación, pausa si un humano responde y mantiene respuestas breves.</p>
+        </div>
+      </aside>
+    </main>
 
     <script>
-      const form = document.getElementById('config-form');
-      const testForm = document.getElementById('test-form');
-      const status = document.getElementById('status');
+      const ids = [
+        'destinationNumber', 'whatsappInstance', 'openaiModel', 'autoReplyEnabled',
+        'pauseMinutes', 'humanDelayMs', 'businessName', 'maxResponseChars',
+        'businessSummary', 'webhookUrl'
+      ];
+      const statusBox = document.getElementById('status');
+      const pill = document.getElementById('health-pill');
       const testResult = document.getElementById('test-result');
 
+      function setStatus(text) {
+        statusBox.textContent = text;
+      }
+
       async function loadConfig() {
+        const res = await fetch('/config');
+        const data = await res.json();
+        ids.forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.value = data[id] ?? '';
+        });
+        document.getElementById('autoReplyEnabled').value = String(data.autoReplyEnabled);
+      }
+
+      async function loadStatus() {
         try {
-          const res = await fetch('/config');
+          const res = await fetch('/status');
           const data = await res.json();
-          document.getElementById('destinationNumber').value = data.destinationNumber || '';
-          document.getElementById('whatsappInstance').value = data.whatsappInstance || '';
-          document.getElementById('openaiModel').value = data.openaiModel || '';
-          document.getElementById('autoReplyEnabled').value = String(data.autoReplyEnabled);
-          document.getElementById('pauseMinutes').value = data.pauseMinutes || 15;
-          status.textContent = 'Configuración cargada correctamente.';
+          const state = data.whatsapp?.instance?.state || data.whatsapp?.state || 'desconocido';
+          pill.textContent = data.ok ? 'Operativo' : 'Revisar';
+          pill.style.background = data.ok ? '#dcfce7' : '#fee2e2';
+          pill.style.color = data.ok ? '#166534' : '#991b1b';
+          setStatus(`WhatsApp: ${state}\nAuto-respuesta: ${data.config?.autoReplyEnabled ? 'activa' : 'pausada'}\nWebhook: ${data.config?.webhookUrl || ''}`);
         } catch (error) {
-          status.textContent = 'No se pudo cargar la configuración.';
+          pill.textContent = 'Sin conexión';
+          pill.style.background = '#fee2e2';
+          pill.style.color = '#991b1b';
+          setStatus(error.message);
         }
       }
 
-      form.addEventListener('submit', async (event) => {
+      document.getElementById('config-form').addEventListener('submit', async (event) => {
         event.preventDefault();
-        const payload = {
-          destinationNumber: document.getElementById('destinationNumber').value.trim(),
-          whatsappInstance: document.getElementById('whatsappInstance').value.trim(),
-          openaiModel: document.getElementById('openaiModel').value.trim(),
-          autoReplyEnabled: document.getElementById('autoReplyEnabled').value === 'true',
-          pauseMinutes: Number(document.getElementById('pauseMinutes').value || 15),
-        };
-
-        try {
-          const res = await fetch('/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          const data = await res.json();
-          status.textContent = data.ok === false ? 'Error al guardar.' : 'Configuración guardada correctamente.';
-        } catch (error) {
-          status.textContent = 'No se pudo guardar la configuración.';
-        }
+        const payload = {};
+        ids.forEach((id) => {
+          const value = document.getElementById(id).value;
+          payload[id] = ['pauseMinutes', 'humanDelayMs', 'maxResponseChars'].includes(id) ? Number(value) : value.trim();
+        });
+        payload.autoReplyEnabled = document.getElementById('autoReplyEnabled').value === 'true';
+        const res = await fetch('/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        setStatus(data.ok === false ? `Error: ${data.error}` : 'Configuración guardada.');
+        await loadStatus();
       });
 
-      testForm.addEventListener('submit', async (event) => {
+      document.getElementById('connect-webhook').addEventListener('click', async () => {
+        setStatus('Conectando webhook en Evolution...');
+        const res = await fetch('/connect-webhook', { method: 'POST' });
+        const data = await res.json();
+        setStatus(data.ok ? `Webhook conectado:\n${data.webhookUrl}` : `Error: ${data.error}`);
+        await loadStatus();
+      });
+
+      document.getElementById('refresh-status').addEventListener('click', loadStatus);
+
+      document.getElementById('test-form').addEventListener('submit', async (event) => {
         event.preventDefault();
-        const testPhone = document.getElementById('testPhone').value.trim();
-        const testMessage = document.getElementById('testMessage').value.trim();
-
-        if (!testPhone || !testMessage) {
-          testResult.textContent = 'Por favor completa teléfono y mensaje.';
-          testResult.style.display = 'block';
-          return;
-        }
-
-        testResult.innerHTML = '<strong>Probando...</strong>';
         testResult.style.display = 'block';
-
-        try {
-          const res = await fetch('/test-message', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ telefono: testPhone, mensaje: testMessage }),
-          });
-          const data = await res.json();
-
-          if (data.ok) {
-            testResult.innerHTML = `
-              <strong style="color: #22c55e;">✓ Prueba exitosa</strong><br>
-              <strong>Tu mensaje:</strong> ${data.mensaje}<br>
-              <strong>Respuesta del agente:</strong><br>
-              <em>"${data.respuesta}"</em>
-            `;
-          } else {
-            testResult.innerHTML = `<strong style="color: #ef4444;">✗ Error:</strong> ${data.error}`;
-          }
-        } catch (error) {
-          testResult.innerHTML = '<strong style="color: #ef4444;">✗ Error de conexión:</strong> ' + error.message;
-        }
+        testResult.textContent = 'Probando...';
+        const res = await fetch('/test-message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            telefono: document.getElementById('testPhone').value.trim(),
+            mensaje: document.getElementById('testMessage').value.trim(),
+          }),
+        });
+        const data = await res.json();
+        testResult.textContent = data.ok ? data.respuesta : `Error: ${data.error}`;
       });
 
-      loadConfig();
+      loadConfig().then(loadStatus);
     </script>
   </body>
 </html>

@@ -7,6 +7,12 @@ export interface BotConfig {
   openaiModel: string;
   autoReplyEnabled: boolean;
   pauseMinutes: number;
+  responseStyle: string;
+  businessName: string;
+  businessSummary: string;
+  maxResponseChars: number;
+  humanDelayMs: number;
+  webhookUrl: string;
 }
 
 export class ConfigService {
@@ -39,6 +45,12 @@ export class ConfigService {
       openaiModel: process.env.OPENAI_MODEL || 'gpt-4o',
       autoReplyEnabled: true,
       pauseMinutes: 15,
+      responseStyle: 'corto_profesional_humano',
+      businessName: 'FullPOS',
+      businessSummary: 'Sistema de punto de venta para ventas, inventario, licencias, soporte e instalacion.',
+      maxResponseChars: 420,
+      humanDelayMs: 1200,
+      webhookUrl: 'https://fullpos-backend-fullpos-bot.onqyr1.easypanel.host/webhook',
     };
   }
 

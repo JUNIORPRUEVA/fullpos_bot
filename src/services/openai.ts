@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { toFile } from 'openai/uploads';
 
 export class OpenAIService {
   private client: OpenAI;
@@ -12,19 +13,122 @@ export class OpenAIService {
   async generateAgentReply(context: any): Promise<any> {
     if (!this.client.apiKey) {
       return {
-        client_response: 'Hola 👋, estoy listo para ayudarte con FullPOS. Configura OPENAI_API_KEY para activar la inteligencia del agente.',
+        client_response: 'Hola, estoy listo para ayudarte con FullPOS. Falta configurar la inteligencia del agente.',
       };
     }
 
-    const prompt = `Eres un asesor comercial de FullPOS. Responde en español y orienta al cliente sobre ventas, demo, precio, instalación y soporte.\n\nContexto:\n${JSON.stringify(context, null, 2)}`;
+    const prompt = `Eres el agente profesional de ${context.config?.businessName || 'FullPOS'}.
+
+Objetivo:
+- Responder por WhatsApp como una persona experta, amable y directa.
+- Ayudar con ventas, demostraciones, precios, instalacion, licencias y soporte.
+- Si falta informacion, haz una sola pregunta clara.
+- Si el cliente esta molesto o pide humano, reconoce y deriva con calma.
+
+Estilo obligatorio:
+- Espanol natural de Republica Dominicana/LatAm neutro.
+- Corto, profesional y humano.
+- Maximo ${context.config?.maxResponseChars || 420} caracteres salvo que el cliente pida detalle.
+- No uses listas largas, markdown pesado ni explicaciones internas.
+- No inventes precios, promesas ni datos del cliente.
+
+Devuelve SOLO JSON valido con este formato:
+{
+  "intent": "venta|demo|precio|soporte|licencia|instalacion|ubicacion|otro",
+  "client_response": "respuesta final para WhatsApp",
+  "needs_human": false,
+  "priority": "normal|alta",
+  "next_action": "responder|pedir_dato|derivar_humano|registrar_interes"
+}
+
+Contexto:
+${JSON.stringify(context, null, 2)}`;
 
     const response = await this.client.responses.create({
       model: this.model,
       input: prompt,
       temperature: 0.7,
+      max_output_tokens: 450,
     });
 
     const output = response.output_text || 'Gracias por tu mensaje.';
-    return { client_response: output };
+    return this.parseAgentJson(output, context.config?.maxResponseChars || 420);
+  }
+
+  async transcribeAudio(media: { base64: string; mimetype?: string; fileName?: string }): Promise<string> {
+    if (!this.client.apiKey || !media.base64) {
+      return '';
+    }
+
+    const buffer = Buffer.from(media.base64, 'base64');
+    const file = await toFile(buffer, media.fileName || 'audio.ogg', { type: media.mimetype || 'audio/ogg' });
+    const transcription = await this.client.audio.transcriptions.create({
+      file,
+      model: 'gpt-4o-mini-transcribe',
+      language: 'es',
+    });
+
+    return transcription.text || '';
+  }
+
+  async analyzeImage(media: { base64: string; mimetype?: string }, caption = ''): Promise<string> {
+    if (!this.client.apiKey || !media.base64) {
+      return caption;
+    }
+
+    const mimeType = media.mimetype || 'image/jpeg';
+    const response = await this.client.responses.create({
+      model: this.model,
+      input: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: `Describe brevemente esta imagen para contexto comercial de FullPOS. Caption del cliente: ${caption || 'sin caption'}`,
+            },
+            {
+              type: 'input_image',
+              image_url: `data:${mimeType};base64,${media.base64}`,
+              detail: 'low',
+            },
+          ],
+        },
+      ],
+      max_output_tokens: 180,
+    });
+
+    return response.output_text || caption;
+  }
+
+  private parseAgentJson(raw: string, maxChars: number): any {
+    const cleaned = raw.trim().replace(/^```json/i, '').replace(/^```/i, '').replace(/```$/i, '').trim();
+    try {
+      const parsed = JSON.parse(cleaned);
+      return {
+        intent: parsed.intent || 'otro',
+        client_response: this.limitResponse(String(parsed.client_response || parsed.response || 'Claro, puedo ayudarte.'), maxChars),
+        needs_human: parsed.needs_human === true,
+        priority: parsed.priority || 'normal',
+        next_action: parsed.next_action || 'responder',
+      };
+    } catch {
+      return {
+        intent: 'otro',
+        client_response: this.limitResponse(cleaned || 'Claro, puedo ayudarte.', maxChars),
+        needs_human: false,
+        priority: 'normal',
+        next_action: 'responder',
+      };
+    }
+  }
+
+  private limitResponse(text: string, maxChars: number): string {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxChars) {
+      return normalized;
+    }
+
+    return `${normalized.slice(0, Math.max(0, maxChars - 3)).trim()}...`;
   }
 }
