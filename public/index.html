@@ -34,6 +34,7 @@
         max-width: 1120px;
         margin: 0 auto;
         padding: 22px;
+        width: 100%;
       }
 
       .topbar {
@@ -59,6 +60,7 @@
         border: 1px solid var(--line);
         border-radius: 8px;
         padding: 18px;
+        min-width: 0;
       }
 
       .grid {
@@ -66,6 +68,8 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 14px;
       }
+
+      .grid > div { min-width: 0; }
 
       label {
         display: block;
@@ -118,6 +122,28 @@
         border: 1px solid var(--line);
         color: #334155;
         white-space: pre-wrap;
+        max-width: 100%;
+        max-height: 420px;
+        overflow: auto;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .qr-panel {
+        display: grid;
+        justify-items: start;
+        gap: 10px;
+      }
+
+      .qr-image {
+        width: min(260px, 100%);
+        aspect-ratio: 1;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 10px;
       }
 
       .pill {
@@ -295,6 +321,85 @@
         statusBox.textContent = text;
       }
 
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#039;');
+      }
+
+      function trimLongText(value, key = '') {
+        if (typeof value !== 'string') return value;
+        const lowerKey = String(key).toLowerCase();
+        const isQrPayload = lowerKey.includes('base64') || value.startsWith('data:image/');
+        const isLongPairCode = lowerKey === 'code' && value.length > 120;
+        if (isQrPayload || isLongPairCode || value.length > 700) {
+          return `${value.slice(0, 90)}... [recortado: ${value.length} caracteres]`;
+        }
+        return value;
+      }
+
+      function compactJson(value, key = '') {
+        if (Array.isArray(value)) return value.map((item) => compactJson(item));
+        if (value && typeof value === 'object') {
+          return Object.fromEntries(
+            Object.entries(value).map(([childKey, childValue]) => [childKey, compactJson(childValue, childKey)])
+          );
+        }
+        return trimLongText(value, key);
+      }
+
+      function findQrBase64(value) {
+        if (!value) return '';
+        if (typeof value === 'string') {
+          if (value.startsWith('data:image/')) return value;
+          if (/^[A-Za-z0-9+/=]{500,}$/.test(value) && value.includes('iVBOR')) {
+            return `data:image/png;base64,${value}`;
+          }
+          return '';
+        }
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            const found = findQrBase64(item);
+            if (found) return found;
+          }
+          return '';
+        }
+        if (typeof value === 'object') {
+          const preferred = value.base64 || value.qrcode || value.qrCode || value.qr;
+          const direct = findQrBase64(preferred);
+          if (direct) return direct;
+          for (const item of Object.values(value)) {
+            const found = findQrBase64(item);
+            if (found) return found;
+          }
+        }
+        return '';
+      }
+
+      function renderJson(target, data) {
+        target.style.display = 'block';
+        target.textContent = JSON.stringify(compactJson(data), null, 2);
+      }
+
+      function renderConnectionResult(target, data) {
+        const qr = findQrBase64(data);
+        const json = escapeHtml(JSON.stringify(compactJson(data), null, 2));
+        target.style.display = 'block';
+        if (!qr) {
+          target.textContent = JSON.stringify(compactJson(data), null, 2);
+          return;
+        }
+        target.innerHTML = `<div class="qr-panel">
+          <strong>QR listo para escanear</strong>
+          <img class="qr-image" src="${escapeHtml(qr)}" alt="Código QR de WhatsApp" />
+          <span class="muted">Abre WhatsApp en el teléfono, entra a Dispositivos vinculados y escanea este código.</span>
+          <pre>${json}</pre>
+        </div>`;
+      }
+
       async function loadConfig() {
         const res = await fetch('/config');
         const data = await res.json();
@@ -386,7 +491,7 @@ Webhook: ${data.config?.webhookUrl || ''}`);
           }),
         });
         const data = await res.json();
-        sendResult.textContent = JSON.stringify(data, null, 2);
+        renderJson(sendResult, data);
         await loadStatus();
       });
 
@@ -395,7 +500,7 @@ Webhook: ${data.config?.webhookUrl || ''}`);
         sendResult.textContent = 'Reiniciando instancia...';
         const res = await fetch('/evolution/restart', { method: 'POST' });
         const data = await res.json();
-        sendResult.textContent = JSON.stringify(data, null, 2);
+        renderJson(sendResult, data);
         setTimeout(loadStatus, 3000);
       });
 
@@ -404,7 +509,7 @@ Webhook: ${data.config?.webhookUrl || ''}`);
         sendResult.textContent = 'Consultando conexión...';
         const res = await fetch('/evolution/connect');
         const data = await res.json();
-        sendResult.textContent = JSON.stringify(data, null, 2);
+        renderConnectionResult(sendResult, data);
         await loadStatus();
       });
 
@@ -415,7 +520,8 @@ Webhook: ${data.config?.webhookUrl || ''}`);
         sendResult.textContent = 'Cerrando sesión de Evolution...';
         const res = await fetch('/evolution/logout', { method: 'POST' });
         const data = await res.json();
-        sendResult.textContent = JSON.stringify(data, null, 2) + '\n\nLuego pulsa Ver Conexión / QR.';
+        renderJson(sendResult, data);
+        sendResult.textContent += '\n\nLuego pulsa Ver Conexión / QR.';
         setTimeout(loadStatus, 3000);
       });
 
