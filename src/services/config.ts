@@ -2,8 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export interface BotConfig {
+  whatsappProvider: 'meta' | 'evolution';
   destinationNumber: string;
   whatsappInstance: string;
+  metaPhoneNumberId: string;
+  metaWebhookUrl: string;
+  metaVerifyToken: string;
   openaiModel: string;
   autoReplyEnabled: boolean;
   pauseMinutes: number;
@@ -42,8 +46,12 @@ export class ConfigService {
 
   private defaultConfig(): BotConfig {
     return {
+      whatsappProvider: (process.env.WHATSAPP_PROVIDER as 'meta' | 'evolution') || 'meta',
       destinationNumber: '',
       whatsappInstance: process.env.WHATSAPP_INSTANCE || 'apyra',
+      metaPhoneNumberId: process.env.META_PHONE_NUMBER_ID || '622270290979970',
+      metaWebhookUrl: 'https://fullpos-backend-fullpos-bot.onqyr1.easypanel.host/meta/webhook',
+      metaVerifyToken: process.env.META_VERIFY_TOKEN || 'fullpos_meta_verify_2026',
       openaiModel: process.env.OPENAI_MODEL || 'gpt-4o',
       autoReplyEnabled: true,
       pauseMinutes: 15,

@@ -197,12 +197,23 @@
           <h2>Configuración Del Agente</h2>
           <form id="config-form" class="grid">
             <div>
+              <label>Proveedor WhatsApp</label>
+              <select id="whatsappProvider">
+                <option value="meta">Meta Cloud API</option>
+                <option value="evolution">Evolution API</option>
+              </select>
+            </div>
+            <div>
               <label>Número de destino fijo</label>
               <input id="destinationNumber" placeholder="Vacío = responder al cliente" />
             </div>
             <div>
               <label>Instancia WhatsApp</label>
               <input id="whatsappInstance" placeholder="apyra" />
+            </div>
+            <div>
+              <label>Meta Phone Number ID</label>
+              <input id="metaPhoneNumberId" placeholder="622270290979970" />
             </div>
             <div>
               <label>Modelo OpenAI</label>
@@ -254,13 +265,21 @@
               <textarea id="businessSummary"></textarea>
             </div>
             <div class="span-2">
+              <label>Webhook Meta Callback URL</label>
+              <input id="metaWebhookUrl" />
+            </div>
+            <div class="span-2">
+              <label>Meta Verify Token</label>
+              <input id="metaVerifyToken" />
+            </div>
+            <div class="span-2">
               <label>Webhook del bot</label>
               <input id="webhookUrl" />
             </div>
           </form>
           <div class="actions">
             <button type="submit" form="config-form">Guardar</button>
-            <button id="connect-webhook" class="secondary" type="button">Conectar Evolution</button>
+            <button id="connect-webhook" class="secondary" type="button">Datos Webhook</button>
             <button id="refresh-status" class="ghost" type="button">Actualizar Estado</button>
           </div>
         </div>
@@ -313,14 +332,15 @@
         </div>
         <div>
           <h2>Operación</h2>
-          <p class="muted">El bot responde mensajes entrantes de Evolution, usa memoria corta por conversación, pausa si un humano responde y mantiene respuestas breves.</p>
+          <p class="muted">El bot responde mensajes entrantes de Meta Cloud API, usa memoria corta por conversación, pausa si un humano responde y mantiene respuestas breves.</p>
         </div>
       </aside>
     </main>
 
     <script>
       const ids = [
-        'destinationNumber', 'whatsappInstance', 'openaiModel', 'autoReplyEnabled',
+        'whatsappProvider', 'destinationNumber', 'whatsappInstance', 'metaPhoneNumberId',
+        'metaWebhookUrl', 'metaVerifyToken', 'openaiModel', 'autoReplyEnabled',
         'pauseMinutes', 'humanDelayMs', 'businessName', 'maxResponseChars',
         'businessSummary', 'webhookUrl', 'responseMode', 'ttsVoice'
       ];
@@ -431,13 +451,16 @@
           pill.textContent = data.ok ? 'Operativo' : 'Revisar';
           pill.style.background = data.ok && !conflict.includes('device_removed') ? '#dcfce7' : '#fee2e2';
           pill.style.color = data.ok && !conflict.includes('device_removed') ? '#166534' : '#991b1b';
-          setStatus(`WhatsApp: ${state}
+          setStatus(`Proveedor: ${data.config?.whatsappProvider || 'meta'}
+WhatsApp: ${state}
 Auto-respuesta: ${data.config?.autoReplyEnabled ? 'activa' : 'pausada'}
 Modo: ${data.config?.responseMode || 'auto'}
 Número: ${data.instance?.number || ''}
 Perfil: ${data.instance?.profileName || ''}
 Conflicto: ${conflict.includes('device_removed') ? 'device_removed: necesita revincular QR' : 'no detectado'}
-Webhook: ${data.config?.webhookUrl || ''}`);
+Meta Callback: ${data.config?.metaWebhookUrl || ''}
+Meta Verify Token: ${data.config?.metaVerifyToken || ''}
+Evolution Webhook: ${data.config?.webhookUrl || ''}`);
         } catch (error) {
           pill.textContent = 'Sin conexión';
           pill.style.background = '#fee2e2';
@@ -465,10 +488,10 @@ Webhook: ${data.config?.webhookUrl || ''}`);
       });
 
       document.getElementById('connect-webhook').addEventListener('click', async () => {
-        setStatus('Conectando webhook en Evolution...');
+        setStatus('Consultando datos de webhook...');
         const res = await fetch('/connect-webhook', { method: 'POST' });
         const data = await res.json();
-        setStatus(data.ok ? `Webhook conectado:\n${data.webhookUrl}` : `Error: ${data.error}`);
+        setStatus(data.ok ? JSON.stringify(compactJson(data), null, 2) : `Error: ${data.error}`);
         await loadStatus();
       });
 

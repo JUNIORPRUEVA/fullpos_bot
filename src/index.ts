@@ -6,6 +6,7 @@ import { RedisService } from './services/redis';
 import { PostgresService } from './services/postgres';
 import { OpenAIService } from './services/openai';
 import { WhatsAppService } from './services/whatsapp';
+import { MetaWhatsAppService } from './services/meta';
 import { ConfigService } from './services/config';
 
 dotenv.config();
@@ -22,6 +23,11 @@ const whatsapp = new WhatsAppService({
   baseUrl: process.env.WHATSAPP_BASE_URL || '',
   apiKey: process.env.EVOLUTION_GLOBAL_API_KEY || process.env.WHATSAPP_API_KEY || '',
   instance: process.env.WHATSAPP_INSTANCE || 'apyra',
+});
+const metaWhatsapp = new MetaWhatsAppService({
+  token: process.env.META_WHATSAPP_TOKEN || '',
+  phoneNumberId: process.env.META_PHONE_NUMBER_ID || '622270290979970',
+  graphVersion: process.env.META_GRAPH_VERSION || 'v25.0',
 });
 
 function getMessageText(message: any): string {
@@ -80,9 +86,94 @@ function getWebhookMedia(body: any, tipoMensaje: string): { base64: string; mime
   };
 }
 
+function getMetaMessageText(message: any): string {
+  return String(
+    message?.text?.body
+    || message?.image?.caption
+    || message?.video?.caption
+    || message?.button?.text
+    || message?.interactive?.button_reply?.title
+    || message?.interactive?.list_reply?.title
+    || '',
+  ).trim();
+}
+
+function getMetaMessageType(message: any): string {
+  if (message?.type === 'location') return 'ubicacion';
+  if (message?.type === 'audio' || message?.type === 'voice') return 'audio';
+  if (message?.type === 'image') return 'image';
+  if (message?.type === 'video') return 'video';
+  if (getMetaMessageText(message)) return 'text';
+  return message?.type || 'unknown';
+}
+
+function getMetaLocationText(message: any): string {
+  const location = message?.location;
+  if (!location) return '';
+  const label = location.name || location.address || '';
+  const maps = location.latitude && location.longitude
+    ? `https://www.google.com/maps?q=${location.latitude},${location.longitude}`
+    : '';
+  return [label, maps].filter(Boolean).join(' | ');
+}
+
+function getMetaMediaId(message: any, tipoMensaje: string): string {
+  if (tipoMensaje === 'audio') return message?.audio?.id || message?.voice?.id || '';
+  if (tipoMensaje === 'image') return message?.image?.id || '';
+  if (tipoMensaje === 'video') return message?.video?.id || '';
+  return '';
+}
+
 async function wait(ms: number): Promise<void> {
   if (ms <= 0) return;
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function buildAgentResponse(params: {
+  userMessage: string;
+  tipoMensaje: string;
+  remoteJid: string;
+  instance: string;
+}) {
+  const config = configService.get();
+  openai.setModel(config.openaiModel);
+  const normalizedPhone = String(params.remoteJid || '').replace(/@.*/, '').replace(/[^0-9]/g, '');
+  const customer = await postgres.getCustomerByPhone(normalizedPhone);
+  const licenses = await postgres.getLicensesByCustomer(customer?.id || '');
+  const memoryKey = `memory:${params.remoteJid}`;
+  const history = await redis.getJsonList(memoryKey, 10);
+
+  const context = {
+    mensaje: params.userMessage,
+    tipo_mensaje: params.tipoMensaje,
+    telefono: params.remoteJid,
+    instancia: params.instance,
+    cliente: customer,
+    licencias: licenses,
+    contexto_comercial: {
+      negocio: customer?.nombre_negocio || '',
+      estado: customer ? 'registered' : 'unknown',
+    },
+    historial: history,
+    recursos: [],
+    config: {
+      businessName: config.businessName,
+      businessSummary: config.businessSummary,
+      responseStyle: config.responseStyle,
+      maxResponseChars: config.maxResponseChars,
+    },
+  };
+
+  const agentReply = await openai.generateAgentReply(context);
+  const responseText = agentReply?.client_response || 'Gracias por tu mensaje.';
+
+  await redis.pushJson(memoryKey, { role: 'user', text: params.userMessage, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
+  await redis.pushJson(memoryKey, { role: 'assistant', text: responseText, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
+
+  return {
+    responseText,
+    agentReply,
+  };
 }
 
 app.get('/config', (_req, res) => {
@@ -102,6 +193,16 @@ app.post('/config', (req, res) => {
 app.post('/connect-webhook', async (_req, res) => {
   try {
     const config = configService.get();
+    if (config.whatsappProvider === 'meta') {
+      return res.json({
+        ok: true,
+        provider: 'meta',
+        callbackUrl: config.metaWebhookUrl,
+        verifyToken: config.metaVerifyToken,
+        fields: ['messages'],
+        note: 'Configura estos datos en Meta Developers > WhatsApp > Configuracion > Webhooks.',
+      });
+    }
     const data = await whatsapp.configureWebhook(config.whatsappInstance, config.webhookUrl);
     res.json({ ok: true, webhookUrl: config.webhookUrl, data });
   } catch (error) {
@@ -113,8 +214,18 @@ app.post('/connect-webhook', async (_req, res) => {
 app.get('/status', async (_req, res) => {
   try {
     const config = configService.get();
-    const state = await whatsapp.getConnectionState(config.whatsappInstance);
-    const instance = await whatsapp.fetchInstance(config.whatsappInstance);
+    const state = config.whatsappProvider === 'meta'
+      ? { instance: { instanceName: 'meta-cloud-api', state: metaWhatsapp.isConfigured() ? 'ready' : 'missing_config' } }
+      : await whatsapp.getConnectionState(config.whatsappInstance);
+    const instance = config.whatsappProvider === 'meta'
+      ? {
+        name: 'meta-cloud-api',
+        connectionStatus: metaWhatsapp.isConfigured() ? 'ready' : 'missing_config',
+        ownerJid: config.metaPhoneNumberId,
+        profileName: 'WhatsApp Cloud API',
+        number: config.metaPhoneNumberId,
+      }
+      : await whatsapp.fetchInstance(config.whatsappInstance);
     res.json({
       ok: true,
       service: 'fullpos-agente-bot',
@@ -200,6 +311,36 @@ app.post('/whatsapp/send-test', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'telefono requerido' });
     }
 
+    if (config.whatsappProvider === 'meta') {
+      const to = telefono.replace(/[^0-9]/g, '');
+      const sendData = await metaWhatsapp.sendText(to, mensaje);
+      let accepted = sendData?.status >= 200 && sendData?.status < 300;
+      let finalData = sendData;
+      let fallbackUsed = false;
+      if (!accepted) {
+        finalData = await metaWhatsapp.sendTemplate(to);
+        accepted = finalData?.status >= 200 && finalData?.status < 300;
+        fallbackUsed = accepted;
+      }
+      return res.status(accepted ? 200 : 400).json({
+        ok: accepted,
+        provider: 'meta',
+        sentToApi: accepted,
+        phoneNumberId: config.metaPhoneNumberId,
+        to,
+        messageId: finalData?.data?.messages?.[0]?.id || '',
+        messageStatus: finalData?.data?.messages?.[0]?.message_status || '',
+        fallbackTemplateUsed: fallbackUsed,
+        data: finalData?.data,
+        firstAttempt: sendData?.data,
+        note: accepted && fallbackUsed
+          ? 'Meta rechazo el texto libre fuera de ventana, pero acepto la plantilla hello_world.'
+          : accepted
+            ? 'Meta acepto el mensaje. La entrega final llega por webhook de statuses.'
+            : 'Meta rechazo el texto libre y tambien la plantilla. Revisa destinatario permitido, token o permisos.',
+      });
+    }
+
     const remoteJid = telefono.includes('@') ? telefono : `${telefono.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
     const sendData = await whatsapp.sendText(remoteJid, mensaje, config.whatsappInstance);
     const messageId = sendData?.key?.id || '';
@@ -227,6 +368,102 @@ app.post('/whatsapp/send-test', async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'error_enviando_prueba';
     res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.get('/meta/webhook', (req, res) => {
+  const config = configService.get();
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode === 'subscribe' && token === config.metaVerifyToken) {
+    return res.status(200).send(String(challenge || ''));
+  }
+
+  return res.sendStatus(403);
+});
+
+app.post('/meta/webhook', async (req, res) => {
+  res.sendStatus(200);
+
+  try {
+    const config = configService.get();
+    if (!config.autoReplyEnabled || config.whatsappProvider !== 'meta') return;
+
+    const entries = Array.isArray(req.body?.entry) ? req.body.entry : [];
+    for (const entry of entries) {
+      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+      for (const change of changes) {
+        const value = change?.value || {};
+        const messages = Array.isArray(value?.messages) ? value.messages : [];
+        for (const message of messages) {
+          const from = String(message?.from || '').replace(/[^0-9]/g, '');
+          const messageId = message?.id || '';
+          if (!from || !messageId) continue;
+
+          const dedupeKey = `meta:seen:${messageId}`;
+          const alreadySeen = await redis.get(dedupeKey);
+          if (alreadySeen) continue;
+          await redis.set(dedupeKey, '1', 60 * 60 * 24);
+
+          await metaWhatsapp.markAsRead(messageId);
+
+          const pauseKey = `pause:${from}`;
+          const pauseActive = await redis.get(pauseKey);
+          if (pauseActive) continue;
+
+          const tipoMensaje = getMetaMessageType(message);
+          let userMessage = getMetaMessageText(message);
+
+          if (tipoMensaje === 'ubicacion') {
+            userMessage = getMetaLocationText(message) || 'El cliente envio una ubicacion.';
+          }
+
+          const mediaId = getMetaMediaId(message, tipoMensaje);
+          if ((tipoMensaje === 'audio' || tipoMensaje === 'image') && mediaId) {
+            try {
+              const media = await metaWhatsapp.fetchMediaBase64(mediaId);
+              if (media?.base64 && tipoMensaje === 'audio') {
+                userMessage = await openai.transcribeAudio(media);
+              }
+              if (media?.base64 && tipoMensaje === 'image') {
+                userMessage = await openai.analyzeImage(media, userMessage);
+              }
+            } catch (error) {
+              const mediaError = error instanceof Error ? error.message : 'error_media_meta';
+              console.warn(`No se pudo procesar media Meta: ${mediaError}`);
+            }
+          }
+
+          if (!userMessage) continue;
+
+          await wait(Number(config.humanDelayMs || 0));
+          const { responseText, agentReply } = await buildAgentResponse({
+            userMessage,
+            tipoMensaje,
+            remoteJid: from,
+            instance: 'meta-cloud-api',
+          });
+          const targetNumber = config.destinationNumber || from;
+          const sendData = await metaWhatsapp.sendText(targetNumber, responseText);
+          const signature = createHash('sha256').update(`${from}:${responseText}`).digest('hex');
+          console.log(JSON.stringify({
+            provider: 'meta',
+            event: 'auto_reply',
+            signature,
+            from,
+            targetNumber,
+            messageId: sendData?.data?.messages?.[0]?.id,
+            status: sendData?.status,
+            intent: agentReply?.intent,
+          }));
+        }
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_meta_webhook';
+    console.warn(`No se pudo procesar webhook Meta: ${message}`);
   }
 });
 
