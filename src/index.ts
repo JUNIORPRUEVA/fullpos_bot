@@ -147,6 +147,17 @@ app.post('/evolution/restart', async (_req, res) => {
   }
 });
 
+app.post('/evolution/logout', async (_req, res) => {
+  try {
+    const config = configService.get();
+    const data = await whatsapp.logoutInstance(config.whatsappInstance);
+    res.json({ ok: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_cerrando_sesion';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
 app.get('/evolution/connect', async (_req, res) => {
   try {
     const config = configService.get();

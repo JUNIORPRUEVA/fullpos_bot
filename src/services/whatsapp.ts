@@ -139,6 +139,21 @@ export class WhatsAppService {
     return response.data;
   }
 
+  async logoutInstance(instance: string): Promise<any> {
+    const response = await axios.delete(`${this.config.baseUrl}/instance/logout/${instance}`, {
+      headers: {
+        apikey: this.config.apiKey,
+      },
+      timeout: 20000,
+      validateStatus: () => true,
+    });
+
+    return {
+      status: response.status,
+      data: response.data,
+    };
+  }
+
   async connectInstance(instance: string): Promise<any> {
     const response = await axios.get(`${this.config.baseUrl}/instance/connect/${instance}`, {
       headers: {

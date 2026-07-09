@@ -262,6 +262,7 @@
             <button type="submit" form="send-form" class="secondary">Enviar Y Verificar</button>
             <button id="restart-instance" class="ghost" type="button">Reiniciar Instancia</button>
             <button id="connect-instance" class="ghost" type="button">Ver Conexión / QR</button>
+            <button id="logout-instance" class="danger" type="button">Cerrar Sesión Y Pedir QR</button>
           </div>
           <div id="send-result" class="status" style="display:none; margin-top: 14px;"></div>
         </div>
@@ -405,6 +406,17 @@ Webhook: ${data.config?.webhookUrl || ''}`);
         const data = await res.json();
         sendResult.textContent = JSON.stringify(data, null, 2);
         await loadStatus();
+      });
+
+      document.getElementById('logout-instance').addEventListener('click', async () => {
+        const ok = confirm('Esto cerrará la sesión WhatsApp de la instancia y necesitarás escanear QR otra vez. ¿Continuar?');
+        if (!ok) return;
+        sendResult.style.display = 'block';
+        sendResult.textContent = 'Cerrando sesión de Evolution...';
+        const res = await fetch('/evolution/logout', { method: 'POST' });
+        const data = await res.json();
+        sendResult.textContent = JSON.stringify(data, null, 2) + '\n\nLuego pulsa Ver Conexión / QR.';
+        setTimeout(loadStatus, 3000);
       });
 
       loadConfig().then(loadStatus);
