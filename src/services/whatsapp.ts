@@ -34,11 +34,8 @@ export class WhatsAppService {
       options: {
         delay,
         presence: 'recording',
-        encoding: true,
       },
-      audioMessage: {
-        audio: audioBase64,
-      },
+      audio: audioBase64,
     }, {
       headers: {
         apikey: this.config.apiKey,
