@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  fullpos-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fullpos-agente-bot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      REDIS_URL: ${REDIS_URL:-redis://localhost:6379}
+      POSTGRES_URL: ${POSTGRES_URL:-postgres://user:password@localhost:5432/fullpos_db}
+      WHATSAPP_INSTANCE: ${WHATSAPP_INSTANCE:-apyra}
+      WHATSAPP_API_KEY: ${WHATSAPP_API_KEY:-}
+      WHATSAPP_BASE_URL: ${WHATSAPP_BASE_URL:-https://api.evolution.example.com}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - fullpos-network
+    volumes:
+      - ./bot-config.json:/app/bot-config.json
+
+networks:
+  fullpos-network:
+    driver: bridge
+

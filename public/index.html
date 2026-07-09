@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FullPOS Bot Config</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; background: #0f172a; color: #f8fafc; }
+      .container { max-width: 760px; margin: 40px auto; padding: 24px; background: #111827; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
+      h1 { margin-top: 0; }
+      label { display: block; margin-top: 14px; font-weight: 600; }
+      input, select { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #334155; margin-top: 6px; background: #0f172a; color: white; }
+      button { margin-top: 20px; padding: 10px 16px; border: none; border-radius: 10px; cursor: pointer; background: #22c55e; color: white; font-weight: 700; }
+      .status { margin-top: 16px; padding: 10px; border-radius: 10px; background: #1e293b; }
+      .small { font-size: 0.9rem; color: #94a3b8; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Configuración básica del bot</h1>
+      <p class="small">Administra los valores más importantes para que el bot responda y envíe mensajes correctamente.</p>
+
+      <form id="config-form">
+        <label>Numero de destino</label>
+        <input id="destinationNumber" name="destinationNumber" placeholder="Ej. 18095551234 o 18095551234@s.whatsapp.net" />
+
+        <label>Instancia de WhatsApp</label>
+        <input id="whatsappInstance" name="whatsappInstance" placeholder="Ej. apyra" />
+
+        <label>Modelo OpenAI</label>
+        <input id="openaiModel" name="openaiModel" placeholder="Ej. gpt-4o" />
+
+        <label>Respuestas automáticas</label>
+        <select id="autoReplyEnabled" name="autoReplyEnabled">
+          <option value="true">Activadas</option>
+          <option value="false">Desactivadas</option>
+        </select>
+
+        <label>Pausa del bot (minutos)</label>
+        <input id="pauseMinutes" name="pauseMinutes" type="number" min="1" max="60" />
+
+        <button type="submit">Guardar configuración</button>
+      </form>
+
+      <div id="status" class="status">Cargando configuración...</div>
+
+      <hr style="margin: 30px 0; border: none; border-top: 1px solid #334155;" />
+
+      <h2>Prueba rápida del agente</h2>
+      <p class="small">Envía un mensaje de prueba para ver cómo responde el agente sin necesidad de WhatsApp.</p>
+
+      <form id="test-form">
+        <label>Teléfono (para el contexto)</label>
+        <input id="testPhone" name="testPhone" placeholder="Ej. 18095551234" />
+
+        <label>Mensaje a enviar</label>
+        <textarea id="testMessage" name="testMessage" placeholder="Ej. Quiero probar FullPOS" style="width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #334155; margin-top: 6px; background: #0f172a; color: white; min-height: 80px;"></textarea>
+
+        <button type="submit" style="background: #3b82f6;">Probar agente</button>
+      </form>
+
+      <div id="test-result" style="margin-top: 16px; display: none; padding: 10px; border-radius: 10px; background: #1e293b; border-left: 4px solid #3b82f6;"></div>
+    </div>
+
+    <script>
+      const form = document.getElementById('config-form');
+      const testForm = document.getElementById('test-form');
+      const status = document.getElementById('status');
+      const testResult = document.getElementById('test-result');
+
+      async function loadConfig() {
+        try {
+          const res = await fetch('/config');
+          const data = await res.json();
+          document.getElementById('destinationNumber').value = data.destinationNumber || '';
+          document.getElementById('whatsappInstance').value = data.whatsappInstance || '';
+          document.getElementById('openaiModel').value = data.openaiModel || '';
+          document.getElementById('autoReplyEnabled').value = String(data.autoReplyEnabled);
+          document.getElementById('pauseMinutes').value = data.pauseMinutes || 15;
+          status.textContent = 'Configuración cargada correctamente.';
+        } catch (error) {
+          status.textContent = 'No se pudo cargar la configuración.';
+        }
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const payload = {
+          destinationNumber: document.getElementById('destinationNumber').value.trim(),
+          whatsappInstance: document.getElementById('whatsappInstance').value.trim(),
+          openaiModel: document.getElementById('openaiModel').value.trim(),
+          autoReplyEnabled: document.getElementById('autoReplyEnabled').value === 'true',
+          pauseMinutes: Number(document.getElementById('pauseMinutes').value || 15),
+        };
+
+        try {
+          const res = await fetch('/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          status.textContent = data.ok === false ? 'Error al guardar.' : 'Configuración guardada correctamente.';
+        } catch (error) {
+          status.textContent = 'No se pudo guardar la configuración.';
+        }
+      });
+
+      testForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const testPhone = document.getElementById('testPhone').value.trim();
+        const testMessage = document.getElementById('testMessage').value.trim();
+
+        if (!testPhone || !testMessage) {
+          testResult.textContent = 'Por favor completa teléfono y mensaje.';
+          testResult.style.display = 'block';
+          return;
+        }
+
+        testResult.innerHTML = '<strong>Probando...</strong>';
+        testResult.style.display = 'block';
+
+        try {
+          const res = await fetch('/test-message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telefono: testPhone, mensaje: testMessage }),
+          });
+          const data = await res.json();
+
+          if (data.ok) {
+            testResult.innerHTML = `
+              <strong style="color: #22c55e;">✓ Prueba exitosa</strong><br>
+              <strong>Tu mensaje:</strong> ${data.mensaje}<br>
+              <strong>Respuesta del agente:</strong><br>
+              <em>"${data.respuesta}"</em>
+            `;
+          } else {
+            testResult.innerHTML = `<strong style="color: #ef4444;">✗ Error:</strong> ${data.error}`;
+          }
+        } catch (error) {
+          testResult.innerHTML = '<strong style="color: #ef4444;">✗ Error de conexión:</strong> ' + error.message;
+        }
+      });
+
+      loadConfig();
+    </script>
+  </body>
+</html>
