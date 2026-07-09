@@ -53,6 +53,33 @@ function getLocationText(message: any): string {
   return [label, maps].filter(Boolean).join(' | ');
 }
 
+function getWebhookMedia(body: any, tipoMensaje: string): { base64: string; mimetype?: string; fileName?: string } | null {
+  const message = body?.data?.message || {};
+  const typedMessage = tipoMensaje === 'audio'
+    ? message.audioMessage
+    : tipoMensaje === 'image'
+      ? message.imageMessage
+      : tipoMensaje === 'video'
+        ? message.videoMessage
+        : null;
+
+  const base64 = body?.data?.base64
+    || body?.data?.message?.base64
+    || typedMessage?.base64
+    || typedMessage?.media
+    || '';
+
+  if (!base64 || typeof base64 !== 'string') {
+    return null;
+  }
+
+  return {
+    base64: base64.replace(/^data:[^;]+;base64,/, ''),
+    mimetype: typedMessage?.mimetype || body?.data?.mimetype,
+    fileName: typedMessage?.fileName || body?.data?.fileName,
+  };
+}
+
 async function wait(ms: number): Promise<void> {
   if (ms <= 0) return;
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -140,7 +167,7 @@ app.post('/webhook', async (req, res) => {
 
     if ((tipoMensaje === 'audio' || tipoMensaje === 'image') && key?.id) {
       try {
-        const media = await whatsapp.fetchMediaBase64(key.id, instance);
+        const media = getWebhookMedia(body, tipoMensaje) || await whatsapp.fetchMediaBase64(key.id, instance);
         if (media?.base64 && tipoMensaje === 'audio') {
           userMessage = await openai.transcribeAudio(media);
         }
@@ -185,7 +212,19 @@ app.post('/webhook', async (req, res) => {
 
     if (config.autoReplyEnabled) {
       await wait(Number(config.humanDelayMs || 0));
-      await whatsapp.sendText(targetNumber, responseText, instance);
+      const shouldReplyWithAudio = config.responseMode === 'audio' || (config.responseMode === 'auto' && tipoMensaje === 'audio');
+      if (shouldReplyWithAudio) {
+        try {
+          const audioBase64 = await openai.generateSpeechBase64(responseText, config.ttsVoice);
+          await whatsapp.sendAudio(targetNumber, audioBase64, instance, Number(config.humanDelayMs || 1200));
+        } catch (error) {
+          const audioError = error instanceof Error ? error.message : 'error_audio_respuesta';
+          console.warn(`No se pudo enviar audio, enviando texto: ${audioError}`);
+          await whatsapp.sendText(targetNumber, responseText, instance);
+        }
+      } else {
+        await whatsapp.sendText(targetNumber, responseText, instance);
+      }
     }
 
     await redis.pushJson(memoryKey, { role: 'user', text: userMessage, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);

@@ -193,6 +193,24 @@
               <label>Máximo de caracteres</label>
               <input id="maxResponseChars" type="number" min="120" max="1200" />
             </div>
+            <div>
+              <label>Modo de respuesta</label>
+              <select id="responseMode">
+                <option value="auto">Auto: audio responde audio</option>
+                <option value="text">Solo texto</option>
+                <option value="audio">Siempre audio</option>
+              </select>
+            </div>
+            <div>
+              <label>Voz de audio</label>
+              <select id="ttsVoice">
+                <option value="marin">Marin</option>
+                <option value="cedar">Cedar</option>
+                <option value="coral">Coral</option>
+                <option value="alloy">Alloy</option>
+                <option value="verse">Verse</option>
+              </select>
+            </div>
             <div class="span-2">
               <label>Resumen del negocio</label>
               <textarea id="businessSummary"></textarea>
@@ -244,7 +262,7 @@
       const ids = [
         'destinationNumber', 'whatsappInstance', 'openaiModel', 'autoReplyEnabled',
         'pauseMinutes', 'humanDelayMs', 'businessName', 'maxResponseChars',
-        'businessSummary', 'webhookUrl'
+        'businessSummary', 'webhookUrl', 'responseMode', 'ttsVoice'
       ];
       const statusBox = document.getElementById('status');
       const pill = document.getElementById('health-pill');
@@ -272,7 +290,7 @@
           pill.textContent = data.ok ? 'Operativo' : 'Revisar';
           pill.style.background = data.ok ? '#dcfce7' : '#fee2e2';
           pill.style.color = data.ok ? '#166534' : '#991b1b';
-          setStatus(`WhatsApp: ${state}\nAuto-respuesta: ${data.config?.autoReplyEnabled ? 'activa' : 'pausada'}\nWebhook: ${data.config?.webhookUrl || ''}`);
+          setStatus(`WhatsApp: ${state}\nAuto-respuesta: ${data.config?.autoReplyEnabled ? 'activa' : 'pausada'}\nModo: ${data.config?.responseMode || 'auto'}\nWebhook: ${data.config?.webhookUrl || ''}`);
         } catch (error) {
           pill.textContent = 'Sin conexión';
           pill.style.background = '#fee2e2';

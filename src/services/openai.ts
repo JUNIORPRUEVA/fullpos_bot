@@ -30,6 +30,7 @@ Objetivo:
 - Ayudar con ventas, demostraciones, precios, instalacion, licencias y soporte.
 - Si falta informacion, haz una sola pregunta clara.
 - Si el cliente esta molesto o pide humano, reconoce y deriva con calma.
+- Vender con inteligencia: detecta necesidad, muestra valor concreto y propone demo o siguiente paso.
 
 Estilo obligatorio:
 - Espanol natural de Republica Dominicana/LatAm neutro.
@@ -37,6 +38,14 @@ Estilo obligatorio:
 - Maximo ${context.config?.maxResponseChars || 420} caracteres salvo que el cliente pida detalle.
 - No uses listas largas, markdown pesado ni explicaciones internas.
 - No inventes precios, promesas ni datos del cliente.
+- Si el cliente pide profundidad, explica por bloques pequenos y pregunta si desea ver venta, inventario, reportes o licencias.
+
+Conocimiento comercial de FullPOS:
+- Punto de venta para negocios que necesitan vender rapido, controlar inventario y operar con orden.
+- Puede ayudar a explicar ventas, productos, clientes, inventario, reportes, licencias, instalacion y soporte.
+- En demostraciones, guia con lenguaje simple: registrar producto, vender, consultar inventario, revisar reportes y activar licencia.
+- Para cierre comercial, pide solo el dato siguiente: tipo de negocio, cantidad de cajas/equipos o horario para demo.
+- Si hay soporte tecnico, pide el error exacto, captura o audio breve y ofrece escalar si es urgente.
 
 Devuelve SOLO JSON valido con este formato:
 {
@@ -105,6 +114,23 @@ ${JSON.stringify(context, null, 2)}`;
     });
 
     return response.output_text || caption;
+  }
+
+  async generateSpeechBase64(text: string, voice = 'marin'): Promise<string> {
+    if (!this.client.apiKey || !text.trim()) {
+      return '';
+    }
+
+    const speech = await this.client.audio.speech.create({
+      model: 'gpt-4o-mini-tts',
+      voice,
+      input: text,
+      instructions: 'Habla en español latino profesional, cálido y natural. Ritmo tranquilo, como asesor comercial humano.',
+      response_format: 'mp3',
+    });
+
+    const buffer = Buffer.from(await speech.arrayBuffer());
+    return buffer.toString('base64');
   }
 
   private parseAgentJson(raw: string, maxChars: number): any {

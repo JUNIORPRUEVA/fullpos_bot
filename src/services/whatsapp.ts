@@ -24,6 +24,55 @@ export class WhatsAppService {
     });
   }
 
+  async sendAudio(remoteJid: string, audioBase64: string, instance: string, delay = 1200): Promise<void> {
+    if (!this.config.baseUrl || !this.config.apiKey || !audioBase64) {
+      return;
+    }
+
+    await axios.post(`${this.config.baseUrl}/message/sendWhatsAppAudio/${instance}`, {
+      number: remoteJid.replace(/@s\.whatsapp\.net$/, ''),
+      options: {
+        delay,
+        presence: 'recording',
+        encoding: true,
+      },
+      audioMessage: {
+        audio: audioBase64,
+      },
+    }, {
+      headers: {
+        apikey: this.config.apiKey,
+      },
+      timeout: 30000,
+    });
+  }
+
+  async sendMedia(
+    remoteJid: string,
+    mediaBase64OrUrl: string,
+    instance: string,
+    mediaType: 'image' | 'video' | 'document',
+    caption = '',
+    fileName = 'fullpos-media',
+  ): Promise<void> {
+    if (!this.config.baseUrl || !this.config.apiKey || !mediaBase64OrUrl) {
+      return;
+    }
+
+    await axios.post(`${this.config.baseUrl}/message/sendMedia/${instance}`, {
+      number: remoteJid.replace(/@s\.whatsapp\.net$/, ''),
+      mediatype: mediaType,
+      media: mediaBase64OrUrl,
+      caption,
+      fileName,
+    }, {
+      headers: {
+        apikey: this.config.apiKey,
+      },
+      timeout: 30000,
+    });
+  }
+
   async fetchMediaBase64(messageId: string, instance: string): Promise<EvolutionMedia | null> {
     if (!this.config.baseUrl || !this.config.apiKey || !messageId) {
       return null;

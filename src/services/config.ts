@@ -13,6 +13,8 @@ export interface BotConfig {
   maxResponseChars: number;
   humanDelayMs: number;
   webhookUrl: string;
+  responseMode: 'text' | 'audio' | 'auto';
+  ttsVoice: string;
 }
 
 export class ConfigService {
@@ -51,6 +53,8 @@ export class ConfigService {
       maxResponseChars: 420,
       humanDelayMs: 1200,
       webhookUrl: 'https://fullpos-backend-fullpos-bot.onqyr1.easypanel.host/webhook',
+      responseMode: 'auto',
+      ttsVoice: 'marin',
     };
   }
 
