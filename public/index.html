@@ -288,6 +288,7 @@
             <button type="submit" form="send-form" class="secondary">Enviar Y Verificar</button>
             <button id="restart-instance" class="ghost" type="button">Reiniciar Instancia</button>
             <button id="connect-instance" class="ghost" type="button">Ver Conexión / QR</button>
+            <button id="create-instance" class="ghost" type="button">Crear Instancia Nueva / QR</button>
             <button id="logout-instance" class="danger" type="button">Cerrar Sesión Y Pedir QR</button>
           </div>
           <div id="send-result" class="status" style="display:none; margin-top: 14px;"></div>
@@ -510,6 +511,30 @@ Webhook: ${data.config?.webhookUrl || ''}`);
         const res = await fetch('/evolution/connect');
         const data = await res.json();
         renderConnectionResult(sendResult, data);
+        await loadStatus();
+      });
+
+      document.getElementById('create-instance').addEventListener('click', async () => {
+        const currentName = document.getElementById('whatsappInstance').value.trim();
+        const suggestedName = currentName && !currentName.startsWith('apyra')
+          ? `${currentName}_${Date.now()}`
+          : `fullpos_${Date.now()}`;
+        const instanceName = prompt('Nombre para la instancia nueva:', suggestedName);
+        if (!instanceName) return;
+
+        sendResult.style.display = 'block';
+        sendResult.textContent = 'Creando instancia limpia y preparando QR...';
+        const res = await fetch('/evolution/create-instance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instanceName }),
+        });
+        const data = await res.json();
+        if (data.ok && data.config?.whatsappInstance) {
+          document.getElementById('whatsappInstance').value = data.config.whatsappInstance;
+        }
+        renderConnectionResult(sendResult, data);
+        await loadConfig();
         await loadStatus();
       });
 

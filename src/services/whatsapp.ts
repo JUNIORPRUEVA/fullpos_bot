@@ -139,6 +139,30 @@ export class WhatsAppService {
     return response.data;
   }
 
+  async createInstance(instance: string, webhookUrl: string): Promise<any> {
+    const response = await axios.post(`${this.config.baseUrl}/instance/create`, {
+      instanceName: instance,
+      qrcode: true,
+      integration: 'WHATSAPP-BAILEYS',
+      groupsIgnore: true,
+      webhookUrl,
+      webhookByEvents: false,
+      webhookBase64: true,
+      webhookEvents: ['MESSAGES_UPSERT'],
+    }, {
+      headers: {
+        apikey: this.config.apiKey,
+      },
+      timeout: 20000,
+      validateStatus: () => true,
+    });
+
+    return {
+      status: response.status,
+      data: response.data,
+    };
+  }
+
   async logoutInstance(instance: string): Promise<any> {
     const response = await axios.delete(`${this.config.baseUrl}/instance/logout/${instance}`, {
       headers: {

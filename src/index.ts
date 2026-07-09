@@ -20,7 +20,7 @@ const postgres = new PostgresService(process.env.POSTGRES_URL || 'postgres://use
 const openai = new OpenAIService(process.env.OPENAI_API_KEY || '', process.env.OPENAI_MODEL || 'gpt-4o');
 const whatsapp = new WhatsAppService({
   baseUrl: process.env.WHATSAPP_BASE_URL || '',
-  apiKey: process.env.WHATSAPP_API_KEY || '',
+  apiKey: process.env.EVOLUTION_GLOBAL_API_KEY || process.env.WHATSAPP_API_KEY || '',
   instance: process.env.WHATSAPP_INSTANCE || 'apyra',
 });
 
@@ -155,6 +155,27 @@ app.post('/evolution/logout', async (_req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'error_cerrando_sesion';
     res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.post('/evolution/create-instance', async (req, res) => {
+  try {
+    const config = configService.get();
+    const requestedName = String(req.body?.instanceName || '').trim();
+    const instanceName = (requestedName || `fullpos_${Date.now()}`)
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .slice(0, 48);
+    const data = await whatsapp.createInstance(instanceName, config.webhookUrl);
+
+    if (data.status >= 400) {
+      return res.status(data.status).json({ ok: false, instanceName, data: data.data });
+    }
+
+    const updatedConfig = configService.set({ whatsappInstance: instanceName });
+    return res.json({ ok: true, instanceName, config: updatedConfig, data: data.data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_creando_instancia';
+    return res.status(500).json({ ok: false, error: message });
   }
 });
 
