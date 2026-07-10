@@ -111,6 +111,29 @@ export class MetaWhatsAppService {
     };
   }
 
+  async sendImageLink(to: string, imageUrl: string, caption = ''): Promise<any> {
+    if (!this.isConfigured()) return null;
+    const response = await axios.post(`https://graph.facebook.com/${this.graphVersion}/${this.config.phoneNumberId}/messages`, {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: to.replace(/[^0-9]/g, ''),
+      type: 'image',
+      image: {
+        link: imageUrl,
+        caption: caption.slice(0, 1024),
+      },
+    }, {
+      headers: this.headers(),
+      timeout: 20000,
+      validateStatus: () => true,
+    });
+
+    return {
+      status: response.status,
+      data: response.data,
+    };
+  }
+
   async sendCtaUrl(to: string, body: string, buttonText: string, url: string, footer = 'FullPOS'): Promise<any> {
     if (!this.isConfigured()) return null;
     const response = await axios.post(`https://graph.facebook.com/${this.graphVersion}/${this.config.phoneNumberId}/messages`, {

@@ -9,6 +9,7 @@ import { WhatsAppService } from './services/whatsapp';
 import { MetaWhatsAppService } from './services/meta';
 import { ConfigService } from './services/config';
 import { buildKnowledgeContext, strengthenClientResponse } from './services/knowledge';
+import { isAskingForImage, publicAssetUrl, selectFullposImage } from './services/imageAssets';
 import {
   controlQuestionCadence,
   defaultConversationMemory,
@@ -455,6 +456,16 @@ function shouldSendDemoButton(responseText: string, agentReply: any, topics: str
     || text.includes('fullpos-releases');
 }
 
+function getPublicBaseUrl(): string {
+  const config = configService.get();
+  try {
+    const fromMeta = new URL(config.metaWebhookUrl);
+    return `${fromMeta.protocol}//${fromMeta.host}`;
+  } catch {
+    return 'https://fullpos-backend-fullpos-bot.onqyr1.easypanel.host';
+  }
+}
+
 app.get('/config', (_req, res) => {
   res.json(configService.get());
 });
@@ -531,6 +542,30 @@ app.post('/conversations/:phone/send-demo-button', async (req, res) => {
     res.json({ ok: true, data: data.data });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'error_boton_demo';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.post('/conversations/:phone/send-image', async (req, res) => {
+  try {
+    const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
+    const hint = String(req.body?.hint || 'fullpos imagen').trim();
+    const asset = selectFullposImage(hint);
+    const imageUrl = publicAssetUrl(getPublicBaseUrl(), asset);
+    const data = await metaWhatsapp.sendImageLink(phone, imageUrl, asset.caption);
+    const accepted = data?.status >= 200 && data?.status < 300;
+    await logConversationMessage({
+      phone,
+      direction: 'out',
+      text: `${asset.caption}\n${imageUrl}`,
+      type: 'image',
+      provider: 'meta',
+      status: data?.status,
+      meta: { asset: asset.id, imageUrl, messageId: data?.data?.messages?.[0]?.id },
+    });
+    res.status(accepted ? 200 : 400).json({ ok: accepted, asset, imageUrl, data: data?.data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_enviando_imagen';
     res.status(500).json({ ok: false, error: message });
   }
 });
@@ -831,6 +866,24 @@ app.post('/meta/webhook', async (req, res) => {
             }
           } else {
             sendData = await sendMetaTextNaturally(targetNumber, responseText, messageId);
+          }
+          if (isAskingForImage(userMessage)) {
+            const asset = selectFullposImage(userMessage);
+            const imageUrl = publicAssetUrl(getPublicBaseUrl(), asset);
+            const imageData = await metaWhatsapp.sendImageLink(targetNumber, imageUrl, asset.caption);
+            await logConversationMessage({
+              phone: targetNumber,
+              direction: 'out',
+              text: `${asset.caption}\n${imageUrl}`,
+              type: 'image',
+              provider: 'meta',
+              status: imageData?.status,
+              meta: {
+                asset: asset.id,
+                imageUrl,
+                messageId: imageData?.data?.messages?.[0]?.id,
+              },
+            });
           }
           await notifyHumanIfNeeded({
             provider: 'meta',

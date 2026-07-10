@@ -378,6 +378,8 @@
                 <button id="pause-chat" class="danger" type="button">Pausar</button>
                 <button id="resume-chat" class="ghost" type="button">Activar</button>
                 <button id="send-demo-button" class="secondary" type="button">Botón demo</button>
+                <input id="imageHint" placeholder="imagen ventas, owner..." style="width:160px" />
+                <button id="send-image" class="ghost" type="button">Enviar imagen</button>
               </div>
             </div>
             <div id="messages" class="messages"></div>
@@ -491,6 +493,17 @@ Alerta humano: ${data.config?.humanAlertEnabled ? (data.config?.humanAlertNumber
         await selectConversation(selectedPhone);
       }
 
+      async function sendImage() {
+        if (!selectedPhone) return;
+        const data = await (await fetch(`/conversations/${selectedPhone}/send-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hint: $('imageHint').value.trim() || 'fullpos imagen' })
+        })).json();
+        $('chat-status').textContent = data.ok ? `Imagen enviada: ${data.asset?.title || ''}` : `Error: ${data.error || 'Meta no aceptó la imagen'}`;
+        await selectConversation(selectedPhone);
+      }
+
       $('config-form').addEventListener('submit', async (event) => {
         event.preventDefault();
         const payload = { whatsappProvider: 'meta' };
@@ -523,6 +536,7 @@ Alerta humano: ${data.config?.humanAlertEnabled ? (data.config?.humanAlertNumber
       $('pause-chat').addEventListener('click', pauseSelected);
       $('resume-chat').addEventListener('click', resumeSelected);
       $('send-demo-button').addEventListener('click', sendDemoButton);
+      $('send-image').addEventListener('click', sendImage);
 
       loadConfig().then(loadStatus).then(loadConversations);
       setInterval(loadConversations, 12000);
