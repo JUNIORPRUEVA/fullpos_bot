@@ -296,9 +296,12 @@ export function buildKnowledgeContext(message: string, tipoMensaje: string, conf
 
 export function strengthenClientResponse(message: string, responseText: string, decision: KnowledgeDecision): string {
   const cleaned = String(responseText || '').trim();
+  const normalizedMessage = message.trim().toLowerCase().replace(/[?¿!¡.,]/g, '');
+  const normalizedResponse = cleaned.toLowerCase().replace(/[?¿!¡.,]/g, '');
   const generic = !cleaned
     || /^claro,?\s*puedo ayudarte\.?$/i.test(cleaned)
     || /^gracias por tu mensaje\.?$/i.test(cleaned)
+    || normalizedResponse === normalizedMessage
     || cleaned.length < 35;
 
   if (!generic) return cleaned;
