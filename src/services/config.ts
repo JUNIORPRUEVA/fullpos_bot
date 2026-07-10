@@ -23,6 +23,9 @@ export interface BotConfig {
   ttsVoice: string;
   smartAudioEnabled: boolean;
   detailedResponseChars: number;
+  typingIndicatorEnabled: boolean;
+  messageChunkChars: number;
+  interMessageDelayMs: number;
 }
 
 export class ConfigService {
@@ -71,6 +74,9 @@ export class ConfigService {
       ttsVoice: 'marin',
       smartAudioEnabled: true,
       detailedResponseChars: 1100,
+      typingIndicatorEnabled: true,
+      messageChunkChars: 650,
+      interMessageDelayMs: 1400,
     };
   }
 

@@ -271,6 +271,21 @@
               <label>Caracteres respuesta amplia</label>
               <input id="detailedResponseChars" type="number" min="600" max="1800" />
             </div>
+            <div>
+              <label>Animación escribiendo</label>
+              <select id="typingIndicatorEnabled">
+                <option value="true">Activada</option>
+                <option value="false">Desactivada</option>
+              </select>
+            </div>
+            <div>
+              <label>Corte de mensajes largos</label>
+              <input id="messageChunkChars" type="number" min="350" max="1200" />
+            </div>
+            <div>
+              <label>Pausa entre mensajes</label>
+              <input id="interMessageDelayMs" type="number" min="300" max="8000" step="100" />
+            </div>
             <div class="span-2">
               <label>Resumen del negocio</label>
               <textarea id="businessSummary"></textarea>
@@ -365,7 +380,8 @@
         'metaWebhookUrl', 'metaVerifyToken', 'openaiModel', 'autoReplyEnabled',
         'pauseMinutes', 'humanDelayMs', 'businessName', 'maxResponseChars',
         'businessSummary', 'humanAlertNumber', 'humanAlertEnabled',
-        'webhookUrl', 'responseMode', 'ttsVoice', 'smartAudioEnabled', 'detailedResponseChars'
+        'webhookUrl', 'responseMode', 'ttsVoice', 'smartAudioEnabled', 'detailedResponseChars',
+        'typingIndicatorEnabled', 'messageChunkChars', 'interMessageDelayMs'
       ];
       const statusBox = document.getElementById('status');
       const pill = document.getElementById('health-pill');
@@ -465,6 +481,7 @@
         document.getElementById('autoReplyEnabled').value = String(data.autoReplyEnabled);
         document.getElementById('humanAlertEnabled').value = String(data.humanAlertEnabled);
         document.getElementById('smartAudioEnabled').value = String(data.smartAudioEnabled !== false);
+        document.getElementById('typingIndicatorEnabled').value = String(data.typingIndicatorEnabled !== false);
       }
 
       async function loadStatus() {
@@ -487,6 +504,7 @@ Meta Callback: ${data.config?.metaWebhookUrl || ''}
 Meta Verify Token: ${data.config?.metaVerifyToken || ''}
 Alerta humano: ${data.config?.humanAlertEnabled ? (data.config?.humanAlertNumber || 'sin numero') : 'desactivada'}
 Audio inteligente: ${data.config?.smartAudioEnabled ? 'activo' : 'desactivado'}
+Escribiendo: ${data.config?.typingIndicatorEnabled ? 'activo' : 'desactivado'}
 Evolution Webhook: ${data.config?.webhookUrl || ''}`);
         } catch (error) {
           pill.textContent = 'Sin conexión';
@@ -501,11 +519,12 @@ Evolution Webhook: ${data.config?.webhookUrl || ''}`);
         const payload = {};
         ids.forEach((id) => {
           const value = document.getElementById(id).value;
-          payload[id] = ['pauseMinutes', 'humanDelayMs', 'maxResponseChars', 'detailedResponseChars'].includes(id) ? Number(value) : value.trim();
+          payload[id] = ['pauseMinutes', 'humanDelayMs', 'maxResponseChars', 'detailedResponseChars', 'messageChunkChars', 'interMessageDelayMs'].includes(id) ? Number(value) : value.trim();
         });
         payload.autoReplyEnabled = document.getElementById('autoReplyEnabled').value === 'true';
         payload.humanAlertEnabled = document.getElementById('humanAlertEnabled').value === 'true';
         payload.smartAudioEnabled = document.getElementById('smartAudioEnabled').value === 'true';
+        payload.typingIndicatorEnabled = document.getElementById('typingIndicatorEnabled').value === 'true';
         const res = await fetch('/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

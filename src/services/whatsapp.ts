@@ -9,13 +9,17 @@ export interface EvolutionMedia {
 export class WhatsAppService {
   constructor(private config: { baseUrl: string; apiKey: string; instance: string }) {}
 
-  async sendText(remoteJid: string, text: string, instance: string): Promise<any> {
+  async sendText(remoteJid: string, text: string, instance: string, delay = 0): Promise<any> {
     if (!this.config.baseUrl || !this.config.apiKey) {
       return null;
     }
 
     const response = await axios.post(`${this.config.baseUrl}/message/sendText/${instance}`, {
       number: remoteJid.replace(/@s\.whatsapp\.net$/, ''),
+      options: delay > 0 ? {
+        delay,
+        presence: 'composing',
+      } : undefined,
       text,
     }, {
       headers: {
@@ -24,6 +28,23 @@ export class WhatsAppService {
     });
 
     return response.data;
+  }
+
+  async sendPresence(remoteJid: string, instance: string, presence: 'composing' | 'recording' = 'composing'): Promise<void> {
+    if (!this.config.baseUrl || !this.config.apiKey) {
+      return;
+    }
+
+    await axios.post(`${this.config.baseUrl}/chat/sendPresence/${instance}`, {
+      number: remoteJid.replace(/@s\.whatsapp\.net$/, ''),
+      presence,
+    }, {
+      headers: {
+        apikey: this.config.apiKey,
+      },
+      timeout: 8000,
+      validateStatus: () => true,
+    });
   }
 
   async sendAudio(remoteJid: string, audioBase64: string, instance: string, delay = 1200): Promise<void> {

@@ -124,6 +124,22 @@ export class MetaWhatsAppService {
     });
   }
 
+  async sendTypingIndicator(messageId: string): Promise<void> {
+    if (!this.isConfigured() || !messageId) return;
+    await axios.post(`https://graph.facebook.com/${this.graphVersion}/${this.config.phoneNumberId}/messages`, {
+      messaging_product: 'whatsapp',
+      status: 'read',
+      message_id: messageId,
+      typing_indicator: {
+        type: 'text',
+      },
+    }, {
+      headers: this.headers(),
+      timeout: 10000,
+      validateStatus: () => true,
+    });
+  }
+
   async fetchMediaBase64(mediaId: string): Promise<EvolutionMedia | null> {
     if (!this.isConfigured() || !mediaId) return null;
 

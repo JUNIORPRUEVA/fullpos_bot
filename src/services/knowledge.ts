@@ -109,6 +109,8 @@ export const FULLPOS_KNOWLEDGE = {
     ],
     requirement:
       'La computadora con FullPOS debe estar configurada para sincronizar y el celular necesita Internet para consultar los reportes.',
+    downloadInstruction:
+      'La app FullPOS Owner se descarga desde el mismo sistema FullPOS, entrando a la parte de Nube. Alli aparece el codigo para escanear desde el celular y descargar/vincular la app.',
   },
   pricing: {
     summary:

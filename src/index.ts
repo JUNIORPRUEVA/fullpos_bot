@@ -9,6 +9,16 @@ import { WhatsAppService } from './services/whatsapp';
 import { MetaWhatsAppService } from './services/meta';
 import { ConfigService } from './services/config';
 import { buildKnowledgeContext, strengthenClientResponse } from './services/knowledge';
+import {
+  controlQuestionCadence,
+  defaultConversationMemory,
+  extractTrailingQuestion,
+  humanDelayForText,
+  interpretShortMessage,
+  splitWhatsAppText,
+  updateConversationMemory,
+  type ConversationMemory,
+} from './services/conversation';
 
 dotenv.config();
 
@@ -145,11 +155,38 @@ async function buildAgentResponse(params: {
   const customer = params.customer !== undefined ? params.customer : await postgres.getCustomerByPhone(normalizedPhone);
   const licenses = params.licenses !== undefined ? params.licenses : await postgres.getLicensesByCustomer(customer?.id || '');
   const memoryKey = `memory:${params.remoteJid}`;
+  const conversationKey = `conversation:${params.remoteJid}`;
   const history = params.history !== undefined ? params.history : await redis.getJsonList(memoryKey, 10);
-  const knowledgeContext = buildKnowledgeContext(params.userMessage, params.tipoMensaje, config);
+  const storedConversation = await redis.get(conversationKey);
+  let conversationMemory: ConversationMemory = defaultConversationMemory();
+  if (storedConversation) {
+    try {
+      conversationMemory = { ...defaultConversationMemory(), ...JSON.parse(storedConversation) };
+    } catch {
+      conversationMemory = defaultConversationMemory();
+    }
+  }
+  const storedLearning = await redis.get('learning:fullpos:rolling');
+  let learningContext: any = null;
+  if (storedLearning) {
+    try {
+      const parsed = JSON.parse(storedLearning);
+      learningContext = {
+        total: parsed.total || 0,
+        topicCounts: parsed.topicCounts || {},
+        intentCounts: parsed.intentCounts || {},
+        shortPhrases: parsed.shortPhrases || {},
+      };
+    } catch {
+      learningContext = null;
+    }
+  }
+  const interpretedMessage = interpretShortMessage(params.userMessage, conversationMemory);
+  const knowledgeContext = buildKnowledgeContext(interpretedMessage, params.tipoMensaje, config);
 
   const context = {
-    mensaje: params.userMessage,
+    mensaje: interpretedMessage,
+    mensaje_original: params.userMessage,
     tipo_mensaje: params.tipoMensaje,
     telefono: params.remoteJid,
     instancia: params.instance,
@@ -160,6 +197,8 @@ async function buildAgentResponse(params: {
       estado: customer ? 'registered' : 'unknown',
     },
     historial: history,
+    memoria_inteligente: conversationMemory,
+    aprendizaje_reciente: learningContext,
     recursos: knowledgeContext.resources,
     conocimiento_fullpos: knowledgeContext.knowledge,
     temas_detectados: knowledgeContext.topics,
@@ -177,20 +216,41 @@ async function buildAgentResponse(params: {
   };
 
   const agentReply = await openai.generateAgentReply(context);
-  const responseText = strengthenClientResponse(
-    params.userMessage,
+  const strongResponse = strengthenClientResponse(
+    interpretedMessage,
     agentReply?.client_response || 'Gracias por tu mensaje.',
     knowledgeContext,
   );
+  const needsQuestion = agentReply?.required_action === 'pedir_aclaracion'
+    || agentReply?.needs_human === true
+    || knowledgeContext.topics.length === 0 && conversationMemory.turnsSinceQuestion >= 2;
+  const responseText = controlQuestionCadence(strongResponse, conversationMemory, needsQuestion);
   agentReply.client_response = responseText;
+  const sentQuestion = Boolean(extractTrailingQuestion(responseText));
+  const updatedConversation = updateConversationMemory({
+    previous: conversationMemory,
+    userMessage: params.userMessage,
+    assistantMessage: responseText,
+    intent: agentReply?.intent,
+    topics: knowledgeContext.topics,
+    sentQuestion,
+  });
 
   await redis.pushJson(memoryKey, { role: 'user', text: params.userMessage, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
   await redis.pushJson(memoryKey, { role: 'assistant', text: responseText, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
+  await redis.set(conversationKey, JSON.stringify(updatedConversation), 60 * 60 * 24 * 45);
+  await recordLearningSignal({
+    userMessage: params.userMessage,
+    topics: knowledgeContext.topics,
+    intent: agentReply?.intent,
+    responseText,
+  });
 
   return {
     responseText,
     agentReply,
     knowledgeContext,
+    conversationMemory: updatedConversation,
   };
 }
 
@@ -205,6 +265,37 @@ function shouldSendAudio(params: {
   return params.tipoMensaje === 'audio'
     || params.knowledgeContext?.shouldUseAudio === true
     || params.agentReply?.response_channel === 'audio';
+}
+
+async function sendMetaTextNaturally(to: string, text: string, messageIdForTyping = ''): Promise<any> {
+  const config = configService.get();
+  const chunks = splitWhatsAppText(text, Number(config.messageChunkChars || 650));
+  let lastSend: any = null;
+  for (const [index, chunk] of chunks.entries()) {
+    if (config.typingIndicatorEnabled && messageIdForTyping) {
+      await metaWhatsapp.sendTypingIndicator(messageIdForTyping).catch(() => undefined);
+    }
+    if (index > 0) {
+      await wait(Number(config.interMessageDelayMs || 1400));
+    }
+    await wait(Math.min(2600, humanDelayForText(chunk)));
+    lastSend = await metaWhatsapp.sendText(to, chunk);
+  }
+  return lastSend;
+}
+
+async function sendEvolutionTextNaturally(remoteJid: string, text: string, instance: string): Promise<void> {
+  const config = configService.get();
+  const chunks = splitWhatsAppText(text, Number(config.messageChunkChars || 650));
+  for (const [index, chunk] of chunks.entries()) {
+    if (config.typingIndicatorEnabled) {
+      await whatsapp.sendPresence(remoteJid, instance, 'composing').catch(() => undefined);
+    }
+    if (index > 0) {
+      await wait(Number(config.interMessageDelayMs || 1400));
+    }
+    await whatsapp.sendText(remoteJid, chunk, instance, Math.min(3500, humanDelayForText(chunk)));
+  }
 }
 
 async function notifyHumanIfNeeded(params: {
@@ -242,6 +333,56 @@ async function notifyHumanIfNeeded(params: {
     const message = error instanceof Error ? error.message : 'error_alerta_humano';
     console.warn(`No se pudo enviar alerta humana: ${message}`);
   }
+}
+
+async function recordLearningSignal(params: {
+  userMessage: string;
+  topics: string[];
+  intent?: string;
+  responseText: string;
+}): Promise<void> {
+  const key = 'learning:fullpos:rolling';
+  let data: any = {
+    total: 0,
+    topicCounts: {},
+    intentCounts: {},
+    shortPhrases: {},
+    examples: [],
+    updatedAt: new Date().toISOString(),
+  };
+
+  const stored = await redis.get(key);
+  if (stored) {
+    try {
+      data = { ...data, ...JSON.parse(stored) };
+    } catch {
+      data = { ...data };
+    }
+  }
+
+  data.total = Number(data.total || 0) + 1;
+  for (const topic of params.topics) {
+    data.topicCounts[topic] = Number(data.topicCounts[topic] || 0) + 1;
+  }
+  const intent = params.intent || 'otro';
+  data.intentCounts[intent] = Number(data.intentCounts[intent] || 0) + 1;
+  if (params.userMessage.trim().length <= 18) {
+    const phrase = params.userMessage.trim().toLowerCase();
+    data.shortPhrases[phrase] = Number(data.shortPhrases[phrase] || 0) + 1;
+  }
+  data.examples = [
+    {
+      at: new Date().toISOString(),
+      message: params.userMessage.slice(0, 180),
+      topics: params.topics,
+      intent,
+      response: params.responseText.slice(0, 220),
+    },
+    ...(Array.isArray(data.examples) ? data.examples : []),
+  ].slice(0, 40);
+  data.updatedAt = new Date().toISOString();
+
+  await redis.set(key, JSON.stringify(data), 60 * 60 * 24 * 30);
 }
 
 app.get('/config', (_req, res) => {
@@ -475,7 +616,11 @@ app.post('/meta/webhook', async (req, res) => {
           if (alreadySeen) continue;
           await redis.set(dedupeKey, '1', 60 * 60 * 24);
 
-          await metaWhatsapp.markAsRead(messageId);
+          if (config.typingIndicatorEnabled) {
+            await metaWhatsapp.sendTypingIndicator(messageId);
+          } else {
+            await metaWhatsapp.markAsRead(messageId);
+          }
 
           const pauseKey = `pause:${from}`;
           const pauseActive = await redis.get(pauseKey);
@@ -529,15 +674,15 @@ app.post('/meta/webhook', async (req, res) => {
               const audioBase64 = await openai.generateSpeechBase64(responseText, config.ttsVoice);
               sendData = await metaWhatsapp.sendAudio(targetNumber, audioBase64);
               if (!sendData?.status || sendData.status >= 300) {
-                sendData = await metaWhatsapp.sendText(targetNumber, responseText);
+                sendData = await sendMetaTextNaturally(targetNumber, responseText, messageId);
               }
             } catch (error) {
               const audioError = error instanceof Error ? error.message : 'error_audio_meta';
               console.warn(`No se pudo enviar audio por Meta, enviando texto: ${audioError}`);
-              sendData = await metaWhatsapp.sendText(targetNumber, responseText);
+              sendData = await sendMetaTextNaturally(targetNumber, responseText, messageId);
             }
           } else {
-            sendData = await metaWhatsapp.sendText(targetNumber, responseText);
+            sendData = await sendMetaTextNaturally(targetNumber, responseText, messageId);
           }
           await notifyHumanIfNeeded({
             provider: 'meta',
@@ -661,11 +806,11 @@ app.post('/webhook', async (req, res) => {
           } catch (error) {
             const audioError = error instanceof Error ? error.message : 'error_audio_respuesta';
             console.warn(`No se pudo enviar audio, enviando texto: ${audioError}`);
-            await whatsapp.sendText(targetNumber, responseText, instance);
+            await sendEvolutionTextNaturally(targetNumber, responseText, instance);
             sent = true;
           }
         } else {
-          await whatsapp.sendText(targetNumber, responseText, instance);
+          await sendEvolutionTextNaturally(targetNumber, responseText, instance);
           sent = true;
         }
       } catch (error) {
