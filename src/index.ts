@@ -8,6 +8,7 @@ import { OpenAIService } from './services/openai';
 import { WhatsAppService } from './services/whatsapp';
 import { MetaWhatsAppService } from './services/meta';
 import { ConfigService } from './services/config';
+import { buildKnowledgeContext } from './services/knowledge';
 
 dotenv.config();
 
@@ -134,14 +135,18 @@ async function buildAgentResponse(params: {
   tipoMensaje: string;
   remoteJid: string;
   instance: string;
+  customer?: any;
+  licenses?: any[];
+  history?: any[];
 }) {
   const config = configService.get();
   openai.setModel(config.openaiModel);
   const normalizedPhone = String(params.remoteJid || '').replace(/@.*/, '').replace(/[^0-9]/g, '');
-  const customer = await postgres.getCustomerByPhone(normalizedPhone);
-  const licenses = await postgres.getLicensesByCustomer(customer?.id || '');
+  const customer = params.customer !== undefined ? params.customer : await postgres.getCustomerByPhone(normalizedPhone);
+  const licenses = params.licenses !== undefined ? params.licenses : await postgres.getLicensesByCustomer(customer?.id || '');
   const memoryKey = `memory:${params.remoteJid}`;
-  const history = await redis.getJsonList(memoryKey, 10);
+  const history = params.history !== undefined ? params.history : await redis.getJsonList(memoryKey, 10);
+  const knowledgeContext = buildKnowledgeContext(params.userMessage, params.tipoMensaje, config);
 
   const context = {
     mensaje: params.userMessage,
@@ -155,12 +160,19 @@ async function buildAgentResponse(params: {
       estado: customer ? 'registered' : 'unknown',
     },
     historial: history,
-    recursos: [],
+    recursos: knowledgeContext.resources,
+    conocimiento_fullpos: knowledgeContext.knowledge,
+    temas_detectados: knowledgeContext.topics,
+    respuesta_sugerida: {
+      usar_detalle: knowledgeContext.shouldUseDetailedAnswer,
+      usar_audio: knowledgeContext.shouldUseAudio,
+      pista: knowledgeContext.responseHint,
+    },
     config: {
       businessName: config.businessName,
       businessSummary: config.businessSummary,
       responseStyle: config.responseStyle,
-      maxResponseChars: config.maxResponseChars,
+      maxResponseChars: knowledgeContext.maxResponseChars,
     },
   };
 
@@ -173,7 +185,21 @@ async function buildAgentResponse(params: {
   return {
     responseText,
     agentReply,
+    knowledgeContext,
   };
+}
+
+function shouldSendAudio(params: {
+  responseMode: 'text' | 'audio' | 'auto';
+  tipoMensaje: string;
+  knowledgeContext?: { shouldUseAudio?: boolean };
+  agentReply?: any;
+}): boolean {
+  if (params.responseMode === 'audio') return true;
+  if (params.responseMode === 'text') return false;
+  return params.tipoMensaje === 'audio'
+    || params.knowledgeContext?.shouldUseAudio === true
+    || params.agentReply?.response_channel === 'audio';
 }
 
 async function notifyHumanIfNeeded(params: {
@@ -481,14 +507,19 @@ app.post('/meta/webhook', async (req, res) => {
           if (!userMessage) continue;
 
           await wait(Number(config.humanDelayMs || 0));
-          const { responseText, agentReply } = await buildAgentResponse({
+          const { responseText, agentReply, knowledgeContext } = await buildAgentResponse({
             userMessage,
             tipoMensaje,
             remoteJid: from,
             instance: 'meta-cloud-api',
           });
           const targetNumber = config.destinationNumber || from;
-          const shouldReplyWithAudio = config.responseMode === 'audio' || (config.responseMode === 'auto' && tipoMensaje === 'audio');
+          const shouldReplyWithAudio = shouldSendAudio({
+            responseMode: config.responseMode,
+            tipoMensaje,
+            knowledgeContext,
+            agentReply,
+          });
           let sendData: any;
           if (shouldReplyWithAudio) {
             try {
@@ -525,6 +556,7 @@ app.post('/meta/webhook', async (req, res) => {
             required_action: agentReply?.required_action,
             needs_human: agentReply?.needs_human === true,
             replyType: shouldReplyWithAudio ? 'audio' : 'text',
+            topics: knowledgeContext.topics,
           }));
         }
       }
@@ -594,37 +626,27 @@ app.post('/webhook', async (req, res) => {
     }
 
     const history = await redis.getJsonList(memoryKey, 10);
-
-    const context = {
-      mensaje: userMessage,
-      tipo_mensaje: tipoMensaje,
-      telefono: remoteJid,
-      instancia: instance,
-      cliente: customer,
-      licencias: licenses,
-      contexto_comercial: {
-        negocio: customer?.nombre_negocio || '',
-        estado: customer ? 'registered' : 'unknown',
-      },
-      historial: history,
-      recursos: [],
-      config: {
-        businessName: config.businessName,
-        businessSummary: config.businessSummary,
-        responseStyle: config.responseStyle,
-        maxResponseChars: config.maxResponseChars,
-      },
-    };
-
-    const agentReply = await openai.generateAgentReply(context);
-    const responseText = agentReply?.client_response || 'Gracias por tu mensaje.';
+    const { responseText, agentReply, knowledgeContext } = await buildAgentResponse({
+      userMessage,
+      tipoMensaje,
+      remoteJid,
+      instance,
+      customer,
+      licenses,
+      history,
+    });
     let sent = false;
     let sendError = '';
 
     if (config.autoReplyEnabled) {
       try {
         await wait(Number(config.humanDelayMs || 0));
-        const shouldReplyWithAudio = config.responseMode === 'audio' || (config.responseMode === 'auto' && tipoMensaje === 'audio');
+        const shouldReplyWithAudio = shouldSendAudio({
+          responseMode: config.responseMode,
+          tipoMensaje,
+          knowledgeContext,
+          agentReply,
+        });
         if (shouldReplyWithAudio) {
           try {
             const audioBase64 = await openai.generateSpeechBase64(responseText, config.ttsVoice);
@@ -646,8 +668,6 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    await redis.pushJson(memoryKey, { role: 'user', text: userMessage, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
-    await redis.pushJson(memoryKey, { role: 'assistant', text: responseText, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
     await notifyHumanIfNeeded({
       provider: 'evolution',
       customerPhone: normalizedPhone,
@@ -658,7 +678,21 @@ app.post('/webhook', async (req, res) => {
     });
 
     const signature = createHash('sha256').update(`${remoteJid}:${responseText}`).digest('hex');
-    return res.json({ ok: true, signature, response: responseText, agent: agentReply, sent, sendError: sendError || undefined });
+    return res.json({
+      ok: true,
+      signature,
+      response: responseText,
+      agent: agentReply,
+      topics: knowledgeContext.topics,
+      replyType: shouldSendAudio({
+        responseMode: config.responseMode,
+        tipoMensaje,
+        knowledgeContext,
+        agentReply,
+      }) ? 'audio' : 'text',
+      sent,
+      sendError: sendError || undefined,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'error_desconocido';
     return res.status(500).json({ ok: false, error: message });
@@ -676,28 +710,30 @@ app.post('/test-message', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'telefono y mensaje requeridos' });
     }
 
-    const config = configService.get();
-    openai.setModel(config.openaiModel);
-    const context = {
-      mensaje: mensaje,
-      tipo_mensaje: 'text',
-      telefono: telefono,
-      cliente: null,
-      licencias: [],
-      contexto_comercial: { negocio: 'desconocido', estado: 'unknown' },
-      historial: [],
-      config: {
-        businessName: config.businessName,
-        businessSummary: config.businessSummary,
-        responseStyle: config.responseStyle,
-        maxResponseChars: config.maxResponseChars,
-      },
-    };
+    const { responseText, agentReply, knowledgeContext } = await buildAgentResponse({
+      userMessage: String(mensaje),
+      tipoMensaje: 'text',
+      remoteJid: String(telefono),
+      instance: 'console-test',
+      customer: null,
+      licenses: [],
+      history: [],
+    });
 
-    const agentReply = await openai.generateAgentReply(context);
-    const responseText = agentReply?.client_response || 'Respuesta del agente no disponible.';
-
-    return res.json({ ok: true, respuesta: responseText, telefono, mensaje });
+    return res.json({
+      ok: true,
+      respuesta: responseText,
+      telefono,
+      mensaje,
+      agent: agentReply,
+      topics: knowledgeContext.topics,
+      replyType: shouldSendAudio({
+        responseMode: configService.get().responseMode,
+        tipoMensaje: 'text',
+        knowledgeContext,
+        agentReply,
+      }) ? 'audio' : 'text',
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'error_prueba';
     return res.status(500).json({ ok: false, error: message });

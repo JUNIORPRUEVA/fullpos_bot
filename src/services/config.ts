@@ -21,6 +21,8 @@ export interface BotConfig {
   webhookUrl: string;
   responseMode: 'text' | 'audio' | 'auto';
   ttsVoice: string;
+  smartAudioEnabled: boolean;
+  detailedResponseChars: number;
 }
 
 export class ConfigService {
@@ -67,6 +69,8 @@ export class ConfigService {
       webhookUrl: 'https://fullpos-backend-fullpos-bot.onqyr1.easypanel.host/webhook',
       responseMode: 'auto',
       ttsVoice: 'marin',
+      smartAudioEnabled: true,
+      detailedResponseChars: 1100,
     };
   }
 

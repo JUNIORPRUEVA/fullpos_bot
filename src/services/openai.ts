@@ -38,22 +38,26 @@ No debes sonar robotico, frio, desesperado, inseguro, repetitivo, muy tecnico ni
 
 ESTILO WHATSAPP
 - Respuesta corta, limpia y lista para enviar.
-- Maximo ${context.config?.maxResponseChars || 420} caracteres salvo que el cliente pida detalle.
+- Maximo ${context.config?.maxResponseChars || 420} caracteres segun el modo actual.
 - Usa parrafos breves, saltos de linea y *negritas* cuando ayuden.
 - Usa emojis con moderacion, no siempre.
 - Cierra con una pregunta o siguiente paso claro.
 - Si el cliente escribe corto como "Hola", "precio", "demo", "info", "me interesa", avanza la conversacion sin responder seco.
+- Si respuesta_sugerida.usar_detalle es true, responde con mas contexto y valor, como asesor que domina el sistema.
+- Si respuesta_sugerida.usar_audio es true, escribe como guion natural de nota de voz: claro, humano, fluido, sin listas largas ni tono robotico.
 
 REGLAS COMERCIALES
 - Si el cliente menciona sistema, punto de venta, ventas, inventario, productos, caja, reportes, tienda, minimarket, ferreteria, almacen, restaurante, control de ventas o software para negocio, asume *FullPOS*.
-- No inventes precios, enlaces, descuentos, metodos de pago, promociones, recursos, instaladores ni confirmaciones de pago.
-- Si falta informacion oficial, responde con calma y marca la accion requerida correcta.
-- Si pregunta precio o planes, explica valor y solicita pasar opciones de pago o validar plan, sin inventar montos.
-- Si pide demo, descarga, instalador, manual, video o link, indica que verificaras/revisaras el recurso oficial si no esta disponible en el contexto.
+- Usa conocimiento_fullpos como fuente oficial para explicar funciones, precios, demo, enlaces, FullPOS Owner, guias y beneficios.
+- No inventes descuentos, promociones, confirmaciones de pago ni datos no incluidos en el contexto.
+- Si pregunta precio o planes, usa los planes del contexto y explica que FullPOS Owner esta incluido.
+- Si pide demo, descarga, instalador o link, envia el recurso oficial del contexto si esta disponible.
 - Si dice que pago o envio comprobante, confirma recepcion y manda a verificar pago.
 - Si ya tiene licencia o reporta problema, atiende como soporte y no le vendas de nuevo.
 - Si el caso es complejo, urgente, involucra pago/licencia, o pide una persona, usa needs_human true.
 - Si recibe imagen, audio o video, usa lo interpretado en el contexto y mencionalo naturalmente solo si ayuda.
+- Nunca menciones rutas, servidores, endpoints, tokens, bases de datos, carpetas internas, codigo, repositorios internos ni detalles tecnicos de desarrollo.
+- Cuando guies al cliente en una tarea de FullPOS, explica pasos practicos con lenguaje sencillo, como si estuvieras acompanandolo.
 
 INTENCIONES PERMITIDAS
 saludo, informacion, solicitar_demo, solicitar_descarga, instalacion, precio, planes, compra, pago, enviar_comprobante, activacion, renovacion, soporte, otro
@@ -74,6 +78,7 @@ Devuelve SOLO JSON valido con esta estructura exacta:
   "resource_url": "",
   "resource_title": "",
   "resource_platform": "",
+  "response_channel": "text|audio",
   "should_update_lead": true,
   "should_create_followup": false,
   "followup_type": "",
@@ -89,8 +94,8 @@ ${JSON.stringify(context, null, 2)}`;
     const response = await this.client.responses.create({
       model: this.model,
       input: prompt,
-      temperature: 0.7,
-      max_output_tokens: 800,
+      temperature: 0.68,
+      max_output_tokens: 1400,
     });
 
     const output = response.output_text || 'Gracias por tu mensaje.';
@@ -178,6 +183,7 @@ ${JSON.stringify(context, null, 2)}`;
         resource_url: parsed.resource_url || '',
         resource_title: parsed.resource_title || '',
         resource_platform: parsed.resource_platform || '',
+        response_channel: parsed.response_channel === 'audio' ? 'audio' : 'text',
         should_update_lead: parsed.should_update_lead !== false,
         should_create_followup: parsed.should_create_followup === true,
         followup_type: parsed.followup_type || '',

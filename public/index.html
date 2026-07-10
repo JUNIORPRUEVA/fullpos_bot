@@ -260,6 +260,17 @@
                 <option value="verse">Verse</option>
               </select>
             </div>
+            <div>
+              <label>Audio inteligente</label>
+              <select id="smartAudioEnabled">
+                <option value="true">Activado para explicaciones</option>
+                <option value="false">Solo según modo</option>
+              </select>
+            </div>
+            <div>
+              <label>Caracteres respuesta amplia</label>
+              <input id="detailedResponseChars" type="number" min="600" max="1800" />
+            </div>
             <div class="span-2">
               <label>Resumen del negocio</label>
               <textarea id="businessSummary"></textarea>
@@ -354,7 +365,7 @@
         'metaWebhookUrl', 'metaVerifyToken', 'openaiModel', 'autoReplyEnabled',
         'pauseMinutes', 'humanDelayMs', 'businessName', 'maxResponseChars',
         'businessSummary', 'humanAlertNumber', 'humanAlertEnabled',
-        'webhookUrl', 'responseMode', 'ttsVoice'
+        'webhookUrl', 'responseMode', 'ttsVoice', 'smartAudioEnabled', 'detailedResponseChars'
       ];
       const statusBox = document.getElementById('status');
       const pill = document.getElementById('health-pill');
@@ -453,6 +464,7 @@
         });
         document.getElementById('autoReplyEnabled').value = String(data.autoReplyEnabled);
         document.getElementById('humanAlertEnabled').value = String(data.humanAlertEnabled);
+        document.getElementById('smartAudioEnabled').value = String(data.smartAudioEnabled !== false);
       }
 
       async function loadStatus() {
@@ -474,6 +486,7 @@ Conflicto: ${conflict.includes('device_removed') ? 'device_removed: necesita rev
 Meta Callback: ${data.config?.metaWebhookUrl || ''}
 Meta Verify Token: ${data.config?.metaVerifyToken || ''}
 Alerta humano: ${data.config?.humanAlertEnabled ? (data.config?.humanAlertNumber || 'sin numero') : 'desactivada'}
+Audio inteligente: ${data.config?.smartAudioEnabled ? 'activo' : 'desactivado'}
 Evolution Webhook: ${data.config?.webhookUrl || ''}`);
         } catch (error) {
           pill.textContent = 'Sin conexión';
@@ -488,10 +501,11 @@ Evolution Webhook: ${data.config?.webhookUrl || ''}`);
         const payload = {};
         ids.forEach((id) => {
           const value = document.getElementById(id).value;
-          payload[id] = ['pauseMinutes', 'humanDelayMs', 'maxResponseChars'].includes(id) ? Number(value) : value.trim();
+          payload[id] = ['pauseMinutes', 'humanDelayMs', 'maxResponseChars', 'detailedResponseChars'].includes(id) ? Number(value) : value.trim();
         });
         payload.autoReplyEnabled = document.getElementById('autoReplyEnabled').value === 'true';
         payload.humanAlertEnabled = document.getElementById('humanAlertEnabled').value === 'true';
+        payload.smartAudioEnabled = document.getElementById('smartAudioEnabled').value === 'true';
         const res = await fetch('/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
