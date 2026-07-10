@@ -12,7 +12,7 @@ export interface KnowledgeDecision {
 
 const DOWNLOAD_URL = 'https://github.com/JUNIORPRUEVA/fullpos-releases/releases/latest/download/FullPOS-Setup.exe';
 const RELEASES_URL = 'https://github.com/JUNIORPRUEVA/fullpos-releases/releases/latest';
-const WHATSAPP_URL = 'https://wa.me/18494314070';
+const WHATSAPP_URL = 'https://wa.me/18494290310';
 
 export const FULLPOS_KNOWLEDGE = {
   publicRules: [
@@ -24,7 +24,7 @@ export const FULLPOS_KNOWLEDGE = {
     name: 'FullPOS',
     company: 'FullTech SRL / APYRA',
     country: 'Republica Dominicana',
-    contactWhatsapp: '+1 849-431-4070',
+    contactWhatsapp: '+1 849-429-0310',
     contactUrl: WHATSAPP_URL,
     email: 'jrdigitalrd@gmail.com',
   },
