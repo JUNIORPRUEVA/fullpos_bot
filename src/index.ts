@@ -183,7 +183,7 @@ async function buildAgentResponse(params: {
   }
   const interpretedMessage = interpretShortMessage(params.userMessage, conversationMemory);
   const isShortContextReply = params.userMessage.trim().length <= 18
-    && !/^(precio|precios|demo|info|informacion|informaci[oó]n|owner|app)$/i.test(params.userMessage.trim())
+    && !/\b(precio|precios|demo|info|informacion|informaci[oó]n|owner|app|fullpos)\b/i.test(params.userMessage.trim())
     && (conversationMemory.lastTopics || []).length > 0;
   const knowledgeMessage = isShortContextReply
     ? `${params.userMessage} ${(conversationMemory.lastTopics || []).join(' ')}`

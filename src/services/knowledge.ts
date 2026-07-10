@@ -309,7 +309,24 @@ export function strengthenClientResponse(message: string, responseText: string, 
   if (!generic) return cleaned;
 
   const topics = decision.topics;
+  if (/El cliente respondio afirmativamente/i.test(message) && topics.includes('precio')) {
+    return `Perfecto. Lo mejor es que pruebes primero la demo de *FullPOS* para ver ventas, inventario, caja y reportes funcionando en tu negocio.\n\nDescarga oficial:\n${DOWNLOAD_URL}\n\nSi luego decides activarlo, el plan minimo es de 3 meses por US$60 e incluye FullPOS Owner y soporte.`;
+  }
+
+  if (/El cliente quiere dejarlo para despues/i.test(message)) {
+    return 'Perfecto, sin problema. Te dejo la idea clara: FullPOS puede ayudarte a organizar ventas, inventario, caja y reportes, y puedes probarlo con demo gratis por 5 dias cuando tengas un momento. Lo retomamos con calma cuando estes listo.';
+  }
+
   if (topics.includes('precio')) {
+    if (/\b3\s*meses?\b/i.test(message)) {
+      return 'El plan de *3 meses* cuesta US$60. Incluye FullPOS completo, FullPOS Owner, soporte y actualizaciones. Es buena opcion para probarlo ya en operacion real sin comprometerte por un ano completo.';
+    }
+    if (/\b6\s*meses?\b/i.test(message)) {
+      return 'El plan de *6 meses* cuesta US$120. Incluye FullPOS completo, FullPOS Owner, soporte y actualizaciones. Es una opcion practica si ya quieres usarlo de forma estable en el negocio.';
+    }
+    if (/\b12\s*meses?\b/i.test(message)) {
+      return 'El plan de *12 meses* cuesta US$240. Incluye FullPOS completo, FullPOS Owner, soporte y actualizaciones. Es el mejor valor si quieres dejar el sistema funcionando todo el ano.';
+    }
     return 'Claro. *FullPOS* tiene licencia minima de 3 meses: US$60. Tambien esta el plan de 6 meses por US$120 y 12 meses por US$240. Incluye FullPOS completo, FullPOS Owner, soporte, actualizaciones y sin cargos ocultos. ¿Quieres que te ayude con la demo o con la compra?';
   }
 
