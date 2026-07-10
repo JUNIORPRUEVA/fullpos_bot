@@ -1,5 +1,13 @@
 import OpenAI from 'openai';
 import { toFile } from 'openai/uploads';
+import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 export class OpenAIService {
   private client: OpenAI;
@@ -146,6 +154,60 @@ ${JSON.stringify(context, null, 2)}`;
     });
 
     return response.output_text || caption;
+  }
+
+  async analyzeVideo(media: { base64: string; mimetype?: string; fileName?: string }, caption = ''): Promise<string> {
+    if (!this.client.apiKey || !media.base64) {
+      return caption || 'El cliente envio un video por WhatsApp.';
+    }
+
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fullpos-video-'));
+    const extension = media.mimetype?.includes('quicktime') ? 'mov' : 'mp4';
+    const inputPath = path.join(tempDir, `video-${randomUUID()}.${extension}`);
+    const framePath = path.join(tempDir, 'frame.jpg');
+
+    try {
+      await fs.writeFile(inputPath, Buffer.from(media.base64.replace(/^data:[^;]+;base64,/, ''), 'base64'));
+      await execFileAsync('ffmpeg', [
+        '-y',
+        '-i',
+        inputPath,
+        '-vf',
+        'thumbnail,scale=768:-1',
+        '-frames:v',
+        '1',
+        framePath,
+      ], { timeout: 18000 });
+
+      const frameBase64 = (await fs.readFile(framePath)).toString('base64');
+      const response = await this.client.responses.create({
+        model: this.model,
+        input: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: `Este es un fotograma de un video enviado por un cliente de FullPOS. Interpreta lo visible para ayudar en ventas o soporte, sin inventar datos no visibles. Texto del cliente: ${caption || 'sin texto'}`,
+              },
+              {
+                type: 'input_image',
+                image_url: `data:image/jpeg;base64,${frameBase64}`,
+                detail: 'low',
+              },
+            ],
+          },
+        ],
+        max_output_tokens: 220,
+      });
+
+      return response.output_text || caption || 'El cliente envio un video por WhatsApp.';
+    } catch (error) {
+      const note = caption ? `El cliente envio un video con este texto: ${caption}` : 'El cliente envio un video por WhatsApp.';
+      return `${note} No se pudo leer visualmente el video; pide el detalle minimo necesario si hace falta.`;
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   async generateSpeechBase64(text: string, voice = 'marin'): Promise<string> {

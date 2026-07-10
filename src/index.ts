@@ -499,9 +499,7 @@ app.post('/meta/webhook', async (req, res) => {
                 userMessage = await openai.analyzeImage(media, userMessage);
               }
               if (media?.base64 && tipoMensaje === 'video') {
-                userMessage = userMessage
-                  ? `El cliente envio un video con este texto: ${userMessage}`
-                  : 'El cliente envio un video por WhatsApp. Analiza el contexto y pide el detalle minimo necesario si no se entiende el caso.';
+                userMessage = await openai.analyzeVideo(media, userMessage);
               }
             } catch (error) {
               const mediaError = error instanceof Error ? error.message : 'error_media_meta';
@@ -611,7 +609,7 @@ app.post('/webhook', async (req, res) => {
       userMessage = getLocationText(message) || 'El cliente envio una ubicacion.';
     }
 
-    if ((tipoMensaje === 'audio' || tipoMensaje === 'image') && key?.id) {
+    if ((tipoMensaje === 'audio' || tipoMensaje === 'image' || tipoMensaje === 'video') && key?.id) {
       try {
         const media = getWebhookMedia(body, tipoMensaje) || await whatsapp.fetchMediaBase64(key.id, instance);
         if (media?.base64 && tipoMensaje === 'audio') {
@@ -619,6 +617,9 @@ app.post('/webhook', async (req, res) => {
         }
         if (media?.base64 && tipoMensaje === 'image') {
           userMessage = await openai.analyzeImage(media, userMessage);
+        }
+        if (media?.base64 && tipoMensaje === 'video') {
+          userMessage = await openai.analyzeVideo(media, userMessage);
         }
       } catch (error) {
         const mediaError = error instanceof Error ? error.message : 'error_media';
