@@ -176,6 +176,43 @@ async function buildAgentResponse(params: {
   };
 }
 
+async function notifyHumanIfNeeded(params: {
+  provider: 'meta' | 'evolution';
+  customerPhone: string;
+  userMessage: string;
+  responseText: string;
+  agentReply: any;
+  sendMeta?: boolean;
+}): Promise<void> {
+  const config = configService.get();
+  const action = String(params.agentReply?.required_action || params.agentReply?.next_action || '');
+  const needsHuman = params.agentReply?.needs_human === true || action === 'escalar_humano' || action === 'derivar_humano';
+  const humanNumber = String(config.humanAlertNumber || '').replace(/[^0-9]/g, '');
+
+  if (!config.humanAlertEnabled || !needsHuman || !humanNumber) return;
+
+  const alert = [
+    '*FullPOS - cliente necesita humano*',
+    `Cliente: ${params.customerPhone}`,
+    `Intencion: ${params.agentReply?.intent || 'otro'}`,
+    `Accion: ${action || 'sin_accion'}`,
+    `Prioridad: ${params.agentReply?.priority || 'normal'}`,
+    '',
+    `Mensaje: ${params.userMessage.slice(0, 700)}`,
+    '',
+    `Respuesta del bot: ${params.responseText.slice(0, 700)}`,
+  ].join('\n');
+
+  try {
+    if (params.provider === 'meta' || params.sendMeta) {
+      await metaWhatsapp.sendText(humanNumber, alert);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_alerta_humano';
+    console.warn(`No se pudo enviar alerta humana: ${message}`);
+  }
+}
+
 app.get('/config', (_req, res) => {
   res.json(configService.get());
 });
@@ -421,7 +458,7 @@ app.post('/meta/webhook', async (req, res) => {
           }
 
           const mediaId = getMetaMediaId(message, tipoMensaje);
-          if ((tipoMensaje === 'audio' || tipoMensaje === 'image') && mediaId) {
+          if ((tipoMensaje === 'audio' || tipoMensaje === 'image' || tipoMensaje === 'video') && mediaId) {
             try {
               const media = await metaWhatsapp.fetchMediaBase64(mediaId);
               if (media?.base64 && tipoMensaje === 'audio') {
@@ -429,6 +466,11 @@ app.post('/meta/webhook', async (req, res) => {
               }
               if (media?.base64 && tipoMensaje === 'image') {
                 userMessage = await openai.analyzeImage(media, userMessage);
+              }
+              if (media?.base64 && tipoMensaje === 'video') {
+                userMessage = userMessage
+                  ? `El cliente envio un video con este texto: ${userMessage}`
+                  : 'El cliente envio un video por WhatsApp. Analiza el contexto y pide el detalle minimo necesario si no se entiende el caso.';
               }
             } catch (error) {
               const mediaError = error instanceof Error ? error.message : 'error_media_meta';
@@ -446,7 +488,30 @@ app.post('/meta/webhook', async (req, res) => {
             instance: 'meta-cloud-api',
           });
           const targetNumber = config.destinationNumber || from;
-          const sendData = await metaWhatsapp.sendText(targetNumber, responseText);
+          const shouldReplyWithAudio = config.responseMode === 'audio' || (config.responseMode === 'auto' && tipoMensaje === 'audio');
+          let sendData: any;
+          if (shouldReplyWithAudio) {
+            try {
+              const audioBase64 = await openai.generateSpeechBase64(responseText, config.ttsVoice);
+              sendData = await metaWhatsapp.sendAudio(targetNumber, audioBase64);
+              if (!sendData?.status || sendData.status >= 300) {
+                sendData = await metaWhatsapp.sendText(targetNumber, responseText);
+              }
+            } catch (error) {
+              const audioError = error instanceof Error ? error.message : 'error_audio_meta';
+              console.warn(`No se pudo enviar audio por Meta, enviando texto: ${audioError}`);
+              sendData = await metaWhatsapp.sendText(targetNumber, responseText);
+            }
+          } else {
+            sendData = await metaWhatsapp.sendText(targetNumber, responseText);
+          }
+          await notifyHumanIfNeeded({
+            provider: 'meta',
+            customerPhone: from,
+            userMessage,
+            responseText,
+            agentReply,
+          });
           const signature = createHash('sha256').update(`${from}:${responseText}`).digest('hex');
           console.log(JSON.stringify({
             provider: 'meta',
@@ -457,6 +522,9 @@ app.post('/meta/webhook', async (req, res) => {
             messageId: sendData?.data?.messages?.[0]?.id,
             status: sendData?.status,
             intent: agentReply?.intent,
+            required_action: agentReply?.required_action,
+            needs_human: agentReply?.needs_human === true,
+            replyType: shouldReplyWithAudio ? 'audio' : 'text',
           }));
         }
       }
@@ -580,6 +648,14 @@ app.post('/webhook', async (req, res) => {
 
     await redis.pushJson(memoryKey, { role: 'user', text: userMessage, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
     await redis.pushJson(memoryKey, { role: 'assistant', text: responseText, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
+    await notifyHumanIfNeeded({
+      provider: 'evolution',
+      customerPhone: normalizedPhone,
+      userMessage,
+      responseText,
+      agentReply,
+      sendMeta: config.whatsappProvider === 'meta',
+    });
 
     const signature = createHash('sha256').update(`${remoteJid}:${responseText}`).digest('hex');
     return res.json({ ok: true, signature, response: responseText, agent: agentReply, sent, sendError: sendError || undefined });

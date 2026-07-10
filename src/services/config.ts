@@ -14,6 +14,8 @@ export interface BotConfig {
   responseStyle: string;
   businessName: string;
   businessSummary: string;
+  humanAlertNumber: string;
+  humanAlertEnabled: boolean;
   maxResponseChars: number;
   humanDelayMs: number;
   webhookUrl: string;
@@ -58,6 +60,8 @@ export class ConfigService {
       responseStyle: 'corto_profesional_humano',
       businessName: 'FullPOS',
       businessSummary: 'Sistema de punto de venta para ventas, inventario, licencias, soporte e instalacion.',
+      humanAlertNumber: '',
+      humanAlertEnabled: true,
       maxResponseChars: 420,
       humanDelayMs: 1200,
       webhookUrl: 'https://fullpos-backend-fullpos-bot.onqyr1.easypanel.host/webhook',

@@ -264,6 +264,17 @@
               <label>Resumen del negocio</label>
               <textarea id="businessSummary"></textarea>
             </div>
+            <div>
+              <label>Teléfono alerta humano</label>
+              <input id="humanAlertNumber" placeholder="Ej: 18295344286" />
+            </div>
+            <div>
+              <label>Alertas a humano</label>
+              <select id="humanAlertEnabled">
+                <option value="true">Activadas</option>
+                <option value="false">Desactivadas</option>
+              </select>
+            </div>
             <div class="span-2">
               <label>Webhook Meta Callback URL</label>
               <input id="metaWebhookUrl" />
@@ -332,7 +343,7 @@
         </div>
         <div>
           <h2>Operación</h2>
-          <p class="muted">El bot responde mensajes entrantes de Meta Cloud API, usa memoria corta por conversación, pausa si un humano responde y mantiene respuestas breves.</p>
+          <p class="muted">El bot responde mensajes entrantes de Meta Cloud API, interpreta texto, imagen, audio y video, puede responder audio y avisa a un humano cuando el caso lo requiere.</p>
         </div>
       </aside>
     </main>
@@ -342,7 +353,8 @@
         'whatsappProvider', 'destinationNumber', 'whatsappInstance', 'metaPhoneNumberId',
         'metaWebhookUrl', 'metaVerifyToken', 'openaiModel', 'autoReplyEnabled',
         'pauseMinutes', 'humanDelayMs', 'businessName', 'maxResponseChars',
-        'businessSummary', 'webhookUrl', 'responseMode', 'ttsVoice'
+        'businessSummary', 'humanAlertNumber', 'humanAlertEnabled',
+        'webhookUrl', 'responseMode', 'ttsVoice'
       ];
       const statusBox = document.getElementById('status');
       const pill = document.getElementById('health-pill');
@@ -440,6 +452,7 @@
           if (el) el.value = data[id] ?? '';
         });
         document.getElementById('autoReplyEnabled').value = String(data.autoReplyEnabled);
+        document.getElementById('humanAlertEnabled').value = String(data.humanAlertEnabled);
       }
 
       async function loadStatus() {
@@ -460,6 +473,7 @@ Perfil: ${data.instance?.profileName || ''}
 Conflicto: ${conflict.includes('device_removed') ? 'device_removed: necesita revincular QR' : 'no detectado'}
 Meta Callback: ${data.config?.metaWebhookUrl || ''}
 Meta Verify Token: ${data.config?.metaVerifyToken || ''}
+Alerta humano: ${data.config?.humanAlertEnabled ? (data.config?.humanAlertNumber || 'sin numero') : 'desactivada'}
 Evolution Webhook: ${data.config?.webhookUrl || ''}`);
         } catch (error) {
           pill.textContent = 'Sin conexión';
@@ -477,6 +491,7 @@ Evolution Webhook: ${data.config?.webhookUrl || ''}`);
           payload[id] = ['pauseMinutes', 'humanDelayMs', 'maxResponseChars'].includes(id) ? Number(value) : value.trim();
         });
         payload.autoReplyEnabled = document.getElementById('autoReplyEnabled').value === 'true';
+        payload.humanAlertEnabled = document.getElementById('humanAlertEnabled').value === 'true';
         const res = await fetch('/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -64,6 +64,53 @@ export class MetaWhatsAppService {
     };
   }
 
+  async uploadMedia(base64: string, mimeType = 'audio/mpeg', fileName = 'respuesta-fullpos.mp3'): Promise<string> {
+    if (!this.isConfigured() || !base64) return '';
+
+    const buffer = Buffer.from(base64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('file', new Blob([buffer], { type: mimeType }), fileName);
+
+    const response = await axios.post(
+      `https://graph.facebook.com/${this.graphVersion}/${this.config.phoneNumberId}/media`,
+      form,
+      {
+        headers: { Authorization: `Bearer ${this.config.token}` },
+        timeout: 30000,
+        validateStatus: () => true,
+      },
+    );
+
+    return response.status >= 200 && response.status < 300 ? String(response.data?.id || '') : '';
+  }
+
+  async sendAudio(to: string, audioBase64: string, mimeType = 'audio/mpeg'): Promise<any> {
+    if (!this.isConfigured()) return null;
+    const mediaId = await this.uploadMedia(audioBase64, mimeType);
+    if (!mediaId) {
+      return { status: 400, data: { error: 'media_upload_failed' } };
+    }
+
+    const response = await axios.post(`https://graph.facebook.com/${this.graphVersion}/${this.config.phoneNumberId}/messages`, {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: to.replace(/[^0-9]/g, ''),
+      type: 'audio',
+      audio: { id: mediaId },
+    }, {
+      headers: this.headers(),
+      timeout: 20000,
+      validateStatus: () => true,
+    });
+
+    return {
+      status: response.status,
+      data: response.data,
+      mediaId,
+    };
+  }
+
   async markAsRead(messageId: string): Promise<void> {
     if (!this.isConfigured() || !messageId) return;
     await axios.post(`https://graph.facebook.com/${this.graphVersion}/${this.config.phoneNumberId}/messages`, {
