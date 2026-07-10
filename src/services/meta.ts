@@ -111,6 +111,75 @@ export class MetaWhatsAppService {
     };
   }
 
+  async sendCtaUrl(to: string, body: string, buttonText: string, url: string, footer = 'FullPOS'): Promise<any> {
+    if (!this.isConfigured()) return null;
+    const response = await axios.post(`https://graph.facebook.com/${this.graphVersion}/${this.config.phoneNumberId}/messages`, {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: to.replace(/[^0-9]/g, ''),
+      type: 'interactive',
+      interactive: {
+        type: 'cta_url',
+        body: { text: body },
+        footer: { text: footer },
+        action: {
+          name: 'cta_url',
+          parameters: {
+            display_text: buttonText,
+            url,
+          },
+        },
+      },
+    }, {
+      headers: this.headers(),
+      timeout: 20000,
+      validateStatus: () => true,
+    });
+
+    return {
+      status: response.status,
+      data: response.data,
+    };
+  }
+
+  async sendReplyButtons(
+    to: string,
+    body: string,
+    buttons: Array<{ id: string; title: string }>,
+    footer = 'FullPOS',
+  ): Promise<any> {
+    if (!this.isConfigured()) return null;
+    const response = await axios.post(`https://graph.facebook.com/${this.graphVersion}/${this.config.phoneNumberId}/messages`, {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: to.replace(/[^0-9]/g, ''),
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: body },
+        footer: { text: footer },
+        action: {
+          buttons: buttons.slice(0, 3).map((button) => ({
+            type: 'reply',
+            reply: {
+              id: button.id.slice(0, 256),
+              title: button.title.slice(0, 20),
+            },
+          })),
+        },
+      },
+    }, {
+      headers: this.headers(),
+      timeout: 20000,
+      validateStatus: () => true,
+    });
+
+    return {
+      status: response.status,
+      data: response.data,
+    };
+  }
+
   async markAsRead(messageId: string): Promise<void> {
     if (!this.isConfigured() || !messageId) return;
     await axios.post(`https://graph.facebook.com/${this.graphVersion}/${this.config.phoneNumberId}/messages`, {

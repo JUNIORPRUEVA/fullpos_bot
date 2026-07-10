@@ -37,4 +37,22 @@ export class RedisService {
       .filter((value): value is T => value !== null)
       .reverse();
   }
+
+  async addToSet(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    const multi = this.client.multi().sadd(key, value);
+    if (ttlSeconds) multi.expire(key, ttlSeconds);
+    await multi.exec();
+  }
+
+  async getSetMembers(key: string): Promise<string[]> {
+    return this.client.smembers(key);
+  }
+
+  async ttl(key: string): Promise<number> {
+    return this.client.ttl(key);
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.client.del(key);
+  }
 }

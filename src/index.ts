@@ -104,7 +104,9 @@ function getMetaMessageText(message: any): string {
     || message?.video?.caption
     || message?.button?.text
     || message?.interactive?.button_reply?.title
+    || message?.interactive?.button_reply?.id
     || message?.interactive?.list_reply?.title
+    || message?.interactive?.list_reply?.id
     || '',
   ).trim();
 }
@@ -154,6 +156,7 @@ async function buildAgentResponse(params: {
   const normalizedPhone = String(params.remoteJid || '').replace(/@.*/, '').replace(/[^0-9]/g, '');
   const customer = params.customer !== undefined ? params.customer : await postgres.getCustomerByPhone(normalizedPhone);
   const licenses = params.licenses !== undefined ? params.licenses : await postgres.getLicensesByCustomer(customer?.id || '');
+  const customerProfile = postgres.classifyCustomer(customer, licenses);
   const memoryKey = `memory:${params.remoteJid}`;
   const conversationKey = `conversation:${params.remoteJid}`;
   const history = params.history !== undefined ? params.history : await redis.getJsonList(memoryKey, 10);
@@ -200,7 +203,10 @@ async function buildAgentResponse(params: {
     licencias: licenses,
     contexto_comercial: {
       negocio: customer?.nombre_negocio || '',
-      estado: customer ? 'registered' : 'unknown',
+      estado: customerProfile.status,
+      descripcion_estado: customerProfile.label,
+      licencia_activa: customerProfile.activeLicense || null,
+      ultima_licencia: customerProfile.latestLicense || null,
     },
     historial: history,
     memoria_inteligente: conversationMemory,
@@ -391,6 +397,64 @@ async function recordLearningSignal(params: {
   await redis.set(key, JSON.stringify(data), 60 * 60 * 24 * 30);
 }
 
+async function logConversationMessage(params: {
+  phone: string;
+  direction: 'in' | 'out';
+  text: string;
+  type?: string;
+  provider?: string;
+  status?: number | string;
+  meta?: Record<string, unknown>;
+}): Promise<void> {
+  const phone = params.phone.replace(/[^0-9]/g, '');
+  if (!phone) return;
+  const item = {
+    at: new Date().toISOString(),
+    direction: params.direction,
+    text: params.text,
+    type: params.type || 'text',
+    provider: params.provider || 'meta',
+    status: params.status || '',
+    meta: params.meta || {},
+  };
+  await redis.pushJson(`messages:${phone}`, item, 80, 60 * 60 * 24 * 60);
+  await redis.addToSet('conversations:phones', phone, 60 * 60 * 24 * 60);
+  await redis.set(`conversation:last:${phone}`, JSON.stringify(item), 60 * 60 * 24 * 60);
+}
+
+async function getConversationList(): Promise<any[]> {
+  const phones = await redis.getSetMembers('conversations:phones');
+  const rows = await Promise.all(phones.map(async (phone) => {
+    const lastRaw = await redis.get(`conversation:last:${phone}`);
+    const pauseTtl = await redis.ttl(`pause:${phone}`);
+    let last: any = null;
+    if (lastRaw) {
+      try {
+        last = JSON.parse(lastRaw);
+      } catch {
+        last = null;
+      }
+    }
+    return {
+      phone,
+      last,
+      paused: pauseTtl > 0,
+      pauseSeconds: pauseTtl > 0 ? pauseTtl : 0,
+    };
+  }));
+
+  return rows.sort((a, b) => String(b.last?.at || '').localeCompare(String(a.last?.at || '')));
+}
+
+function shouldSendDemoButton(responseText: string, agentReply: any, topics: string[]): boolean {
+  const text = `${responseText} ${agentReply?.resource_type || ''} ${agentReply?.resource_url || ''}`.toLowerCase();
+  return topics.includes('demo')
+    || topics.includes('instalacion')
+    || text.includes('descargar')
+    || text.includes('demo')
+    || text.includes('fullpos-releases');
+}
+
 app.get('/config', (_req, res) => {
   res.json(configService.get());
 });
@@ -401,6 +465,72 @@ app.post('/config', (req, res) => {
     res.json(updated);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'error_actualizando_config';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.get('/conversations', async (_req, res) => {
+  try {
+    const conversations = await getConversationList();
+    res.json({ ok: true, conversations });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_conversaciones';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.get('/conversations/:phone/messages', async (req, res) => {
+  try {
+    const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
+    const messages = await redis.getJsonList(`messages:${phone}`, 80);
+    const pauseSeconds = await redis.ttl(`pause:${phone}`);
+    res.json({ ok: true, phone, paused: pauseSeconds > 0, pauseSeconds: Math.max(0, pauseSeconds), messages });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_mensajes';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.post('/conversations/:phone/pause', async (req, res) => {
+  try {
+    const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
+    const minutes = Math.max(1, Math.min(1440, Number(req.body?.minutes || 30)));
+    await redis.set(`pause:${phone}`, 'manual', minutes * 60);
+    res.json({ ok: true, phone, paused: true, minutes });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_pausando';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.post('/conversations/:phone/resume', async (req, res) => {
+  try {
+    const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
+    await redis.delete(`pause:${phone}`);
+    res.json({ ok: true, phone, paused: false });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_reactivando';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.post('/conversations/:phone/send-demo-button', async (req, res) => {
+  try {
+    const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
+    const body = 'Te dejo la demo oficial de FullPOS para Windows. Puedes descargarla, instalarla y probar ventas, inventario, caja y reportes.';
+    const url = 'https://github.com/JUNIORPRUEVA/fullpos-releases/releases/latest/download/FullPOS-Setup.exe';
+    const data = await metaWhatsapp.sendCtaUrl(phone, body, 'Descargar demo', url);
+    const accepted = data?.status >= 200 && data?.status < 300;
+    if (!accepted) {
+      const fallback = `${body}\n\nDescargar demo:\n${url}`;
+      const textData = await metaWhatsapp.sendText(phone, fallback);
+      await logConversationMessage({ phone, direction: 'out', text: fallback, type: 'text', provider: 'meta', status: textData?.status });
+      return res.status(textData?.status >= 200 && textData?.status < 300 ? 200 : 400).json({ ok: textData?.status >= 200 && textData?.status < 300, fallback: true, data: textData?.data });
+    }
+    await logConversationMessage({ phone, direction: 'out', text: `${body}\n[Boton: Descargar demo]`, type: 'button', provider: 'meta', status: data.status });
+    res.json({ ok: true, data: data.data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_boton_demo';
     res.status(500).json({ ok: false, error: message });
   }
 });
@@ -659,6 +789,7 @@ app.post('/meta/webhook', async (req, res) => {
           }
 
           if (!userMessage) continue;
+          await logConversationMessage({ phone: from, direction: 'in', text: userMessage, type: tipoMensaje, provider: 'meta' });
 
           await wait(Number(config.humanDelayMs || 0));
           const { responseText, agentReply, knowledgeContext } = await buildAgentResponse({
@@ -675,7 +806,18 @@ app.post('/meta/webhook', async (req, res) => {
             agentReply,
           });
           let sendData: any;
-          if (shouldReplyWithAudio) {
+          if (!shouldReplyWithAudio && shouldSendDemoButton(responseText, agentReply, knowledgeContext.topics)) {
+            const demoUrl = 'https://github.com/JUNIORPRUEVA/fullpos-releases/releases/latest/download/FullPOS-Setup.exe';
+            sendData = await metaWhatsapp.sendCtaUrl(
+              targetNumber,
+              responseText.slice(0, 900),
+              'Descargar demo',
+              demoUrl,
+            );
+            if (!sendData?.status || sendData.status >= 300) {
+              sendData = await sendMetaTextNaturally(targetNumber, `${responseText}\n\nDescargar demo:\n${demoUrl}`, messageId);
+            }
+          } else if (shouldReplyWithAudio) {
             try {
               const audioBase64 = await openai.generateSpeechBase64(responseText, config.ttsVoice);
               sendData = await metaWhatsapp.sendAudio(targetNumber, audioBase64);
@@ -698,6 +840,19 @@ app.post('/meta/webhook', async (req, res) => {
             agentReply,
           });
           const signature = createHash('sha256').update(`${from}:${responseText}`).digest('hex');
+          await logConversationMessage({
+            phone: targetNumber,
+            direction: 'out',
+            text: responseText,
+            type: shouldReplyWithAudio ? 'audio' : shouldSendDemoButton(responseText, agentReply, knowledgeContext.topics) ? 'button' : 'text',
+            provider: 'meta',
+            status: sendData?.status,
+            meta: {
+              intent: agentReply?.intent,
+              topics: knowledgeContext.topics,
+              messageId: sendData?.data?.messages?.[0]?.id,
+            },
+          });
           console.log(JSON.stringify({
             provider: 'meta',
             event: 'auto_reply',
@@ -781,6 +936,7 @@ app.post('/webhook', async (req, res) => {
     if (!userMessage) {
       return res.json({ ok: true, skipped: true, reason: 'mensaje_sin_contenido_util' });
     }
+    await logConversationMessage({ phone: normalizedPhone, direction: 'in', text: userMessage, type: tipoMensaje, provider: 'evolution' });
 
     const history = await redis.getJsonList(memoryKey, 10);
     const { responseText, agentReply, knowledgeContext } = await buildAgentResponse({
@@ -835,6 +991,20 @@ app.post('/webhook', async (req, res) => {
     });
 
     const signature = createHash('sha256').update(`${remoteJid}:${responseText}`).digest('hex');
+    await logConversationMessage({
+      phone: normalizedPhone,
+      direction: 'out',
+      text: responseText,
+      type: shouldSendAudio({
+        responseMode: config.responseMode,
+        tipoMensaje,
+        knowledgeContext,
+        agentReply,
+      }) ? 'audio' : 'text',
+      provider: 'evolution',
+      status: sent ? 'sent' : sendError || 'not_sent',
+      meta: { intent: agentReply?.intent, topics: knowledgeContext.topics },
+    });
     return res.json({
       ok: true,
       signature,
