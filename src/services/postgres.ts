@@ -10,26 +10,19 @@ export class PostgresService {
   async getCustomerByPhone(phone: string): Promise<any | null> {
     const client = await this.pool.connect();
     try {
-      let result;
-      try {
-        result = await client.query(
-          `SELECT *
-           FROM customers
-           WHERE REGEXP_REPLACE(COALESCE(contacto_telefono, phone, telefono, contact_phone, ''), '[^0-9]', '', 'g') LIKE $1
-           ORDER BY COALESCE(updated_at, created_at, NOW()) DESC
-           LIMIT 1`,
-          [`%${phone}%`],
-        );
-      } catch {
-        result = await client.query(
-          `SELECT id, nombre_negocio, contacto_nombre, contacto_telefono, contacto_email, business_id
-           FROM customers
-           WHERE REGEXP_REPLACE(COALESCE(contacto_telefono, ''), '[^0-9]', '', 'g') LIKE $1
-           ORDER BY created_at DESC
-           LIMIT 1`,
-          [`%${phone}%`],
-        );
-      }
+      const columns = await this.getTableColumns(client, 'customers');
+      const phoneColumn = this.pickColumn(columns, ['contacto_telefono', 'phone', 'telefono', 'contact_phone', 'whatsapp', 'mobile']);
+      if (!phoneColumn) return null;
+      const orderColumn = this.pickColumn(columns, ['updated_at', 'created_at', 'id']);
+      const orderSql = orderColumn ? `ORDER BY ${this.quoteIdent(orderColumn)} DESC` : '';
+      const result = await client.query(
+        `SELECT *
+         FROM customers
+         WHERE REGEXP_REPLACE(COALESCE(${this.quoteIdent(phoneColumn)}::text, ''), '[^0-9]', '', 'g') LIKE $1
+         ${orderSql}
+         LIMIT 1`,
+        [`%${phone}%`],
+      );
       return result.rows[0] || null;
     } catch (error) {
       if (this.isMissingTable(error)) {
@@ -45,11 +38,16 @@ export class PostgresService {
   async getLicensesByCustomer(customerId: string): Promise<any[]> {
     const client = await this.pool.connect();
     try {
+      const columns = await this.getTableColumns(client, 'licenses');
+      const customerColumn = this.pickColumn(columns, ['customer_id', 'customerId', 'client_id']);
+      if (!customerColumn) return [];
+      const orderColumn = this.pickColumn(columns, ['expires_at', 'expiration_date', 'fecha_vencimiento', 'updated_at', 'created_at', 'id']);
+      const orderSql = orderColumn ? `ORDER BY ${this.quoteIdent(orderColumn)} DESC` : '';
       const result = await client.query(
         `SELECT *
          FROM licenses
-         WHERE customer_id = $1
-         ORDER BY COALESCE(expires_at, updated_at, created_at, NOW()) DESC`,
+         WHERE ${this.quoteIdent(customerColumn)} = $1
+         ${orderSql}`,
         [customerId],
       );
       return result.rows;
@@ -109,5 +107,28 @@ export class PostgresService {
       && error !== null
       && 'code' in error
       && (error as { code?: string }).code === '42P01';
+  }
+
+  private async getTableColumns(client: any, tableName: string): Promise<string[]> {
+    const result = await client.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = $1`,
+      [tableName],
+    );
+    return result.rows.map((row: any) => String(row.column_name));
+  }
+
+  private pickColumn(columns: string[], candidates: string[]): string {
+    const lowerMap = new Map(columns.map((column) => [column.toLowerCase(), column]));
+    for (const candidate of candidates) {
+      const found = lowerMap.get(candidate.toLowerCase());
+      if (found) return found;
+    }
+    return '';
+  }
+
+  private quoteIdent(identifier: string): string {
+    return `"${identifier.replace(/"/g, '""')}"`;
   }
 }
