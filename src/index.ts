@@ -448,13 +448,33 @@ async function getConversationList(): Promise<any[]> {
   return rows.sort((a, b) => String(b.last?.at || '').localeCompare(String(a.last?.at || '')));
 }
 
-function shouldSendDemoButton(responseText: string, agentReply: any, topics: string[]): boolean {
-  const text = `${responseText} ${agentReply?.resource_type || ''} ${agentReply?.resource_url || ''}`.toLowerCase();
-  return topics.includes('demo')
-    || topics.includes('instalacion')
-    || text.includes('descargar')
-    || text.includes('demo')
-    || text.includes('fullpos-releases');
+const DEMO_BUTTON_COOLDOWN_SECONDS = 60 * 30;
+const DEMO_DOWNLOAD_URL = 'https://github.com/JUNIORPRUEVA/fullpos-releases/releases/latest/download/FullPOS-Setup.exe';
+
+function clientAskedForDemoButton(userMessage: string): boolean {
+  return /\b(demo|descarg|descargar|instalador|instalar|link|enlace|probar|prueba|bajar)\b/i.test(userMessage);
+}
+
+function agentIsDeliveringDemo(agentReply: any, topics: string[]): boolean {
+  const resourceText = `${agentReply?.resource_type || ''} ${agentReply?.resource_url || ''} ${agentReply?.resource_title || ''}`.toLowerCase();
+  const action = String(agentReply?.required_action || '').toLowerCase();
+  const intent = String(agentReply?.intent || '').toLowerCase();
+
+  return resourceText.includes('fullpos-releases')
+    || resourceText.includes('setup.exe')
+    || (topics.includes('demo') && ['solicitar_demo', 'solicitar_descarga', 'instalacion'].includes(intent))
+    || ['enviar_recurso', 'iniciar_demo'].includes(action) && /\b(demo|descarga|instalador|setup)\b/i.test(resourceText);
+}
+
+async function shouldSendDemoButton(phone: string, userMessage: string, agentReply: any, topics: string[]): Promise<boolean> {
+  if (!clientAskedForDemoButton(userMessage) && !agentIsDeliveringDemo(agentReply, topics)) return false;
+
+  const key = `demo-button:${phone.replace(/[^0-9]/g, '')}`;
+  const ttl = await redis.ttl(key);
+  if (ttl > 0) return false;
+
+  await redis.set(key, new Date().toISOString(), DEMO_BUTTON_COOLDOWN_SECONDS);
+  return true;
 }
 
 function getPublicBaseUrl(): string {
@@ -842,16 +862,20 @@ app.post('/meta/webhook', async (req, res) => {
             agentReply,
           });
           let sendData: any;
-          if (!shouldReplyWithAudio && shouldSendDemoButton(responseText, agentReply, knowledgeContext.topics)) {
-            const demoUrl = 'https://github.com/JUNIORPRUEVA/fullpos-releases/releases/latest/download/FullPOS-Setup.exe';
+          let sentDemoButton = false;
+          const shouldReplyWithDemoButton = !shouldReplyWithAudio
+            && await shouldSendDemoButton(targetNumber, userMessage, agentReply, knowledgeContext.topics);
+          if (shouldReplyWithDemoButton) {
             sendData = await metaWhatsapp.sendCtaUrl(
               targetNumber,
               responseText.slice(0, 900),
               'Descargar demo',
-              demoUrl,
+              DEMO_DOWNLOAD_URL,
             );
+            sentDemoButton = Boolean(sendData?.status && sendData.status >= 200 && sendData.status < 300);
             if (!sendData?.status || sendData.status >= 300) {
-              sendData = await sendMetaTextNaturally(targetNumber, `${responseText}\n\nDescargar demo:\n${demoUrl}`, messageId);
+              sentDemoButton = false;
+              sendData = await sendMetaTextNaturally(targetNumber, `${responseText}\n\nDescargar demo:\n${DEMO_DOWNLOAD_URL}`, messageId);
             }
           } else if (shouldReplyWithAudio) {
             try {
@@ -898,7 +922,7 @@ app.post('/meta/webhook', async (req, res) => {
             phone: targetNumber,
             direction: 'out',
             text: responseText,
-            type: shouldReplyWithAudio ? 'audio' : shouldSendDemoButton(responseText, agentReply, knowledgeContext.topics) ? 'button' : 'text',
+            type: shouldReplyWithAudio ? 'audio' : sentDemoButton ? 'button' : 'text',
             provider: 'meta',
             status: sendData?.status,
             meta: {
