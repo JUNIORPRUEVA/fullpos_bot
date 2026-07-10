@@ -233,6 +233,7 @@ async function buildAgentResponse(params: {
     interpretedMessage,
     agentReply?.client_response || 'Gracias por tu mensaje.',
     knowledgeContext,
+    params.userMessage,
   );
   const needsQuestion = agentReply?.required_action === 'pedir_aclaracion'
     || agentReply?.needs_human === true

@@ -296,19 +296,73 @@ export function buildKnowledgeContext(message: string, tipoMensaje: string, conf
   };
 }
 
-export function strengthenClientResponse(message: string, responseText: string, decision: KnowledgeDecision): string {
+function normalizeForEcho(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[?¿!¡.,;:()"']/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+function socialFallback(message: string, topics: string[]): string | null {
+  const normalized = normalizeForEcho(message);
+
+  if (/\b(gracias|muchas gracias|mil gracias|thank you|thanks)\b/i.test(normalized)) {
+    if (topics.includes('demo')) {
+      return `Con gusto. Te dejo el camino claro: puedes probar FullPOS gratis por 5 dias y descargarlo aqui:\n${DOWNLOAD_URL}`;
+    }
+    if (topics.includes('precio')) {
+      return 'Con gusto. Los planes de FullPOS inician en 3 meses por US$60 e incluyen FullPOS Owner, soporte y actualizaciones.';
+    }
+    return 'Con gusto. FullPOS esta para ayudarte a controlar ventas, inventario, caja y reportes; cuando necesites demo, precios o capturas, te lo comparto por aqui.';
+  }
+
+  if (/\b(mas fotos|mas foto|otra foto|otras fotos|mas imagen|mas imagenes|otra imagen|otras imagenes|mas captura|mas capturas|tiene fotos|tienen fotos|ver fotos|ver imagenes)\b/i.test(normalized)) {
+    return 'Si, te envio otra imagen de FullPOS para que veas mejor como luce el sistema en operacion.';
+  }
+
+  if (/^(hola|buenas|saludos|hey|hello|hi)$/i.test(normalized)) {
+    return 'Hola, soy el asistente de FullPOS. Puedo ayudarte con informacion, demo, precios, instalacion o capturas del sistema.';
+  }
+
+  if (/^(ok|okay|dale|perfecto|bien|claro|entiendo|ta bien|esta bien)$/i.test(normalized)) {
+    return 'Perfecto. Seguimos cuando quieras; puedo pasarte la demo, mostrarte capturas o explicarte los planes de FullPOS.';
+  }
+
+  return null;
+}
+
+export function strengthenClientResponse(
+  message: string,
+  responseText: string,
+  decision: KnowledgeDecision,
+  originalMessage = '',
+): string {
   const cleaned = String(responseText || '').trim();
-  const normalizedMessage = message.trim().toLowerCase().replace(/[?¿!¡.,]/g, '');
-  const normalizedResponse = cleaned.toLowerCase().replace(/[?¿!¡.,]/g, '');
+  const sourceMessage = originalMessage || message;
+  const normalizedMessage = normalizeForEcho(message);
+  const normalizedOriginal = normalizeForEcho(sourceMessage);
+  const normalizedResponse = normalizeForEcho(cleaned);
+  const responseLooksLikeEcho = Boolean(normalizedResponse)
+    && (
+      normalizedResponse === normalizedMessage
+      || normalizedResponse === normalizedOriginal
+      || (normalizedOriginal.length >= 8 && normalizedResponse.length <= normalizedOriginal.length + 12 && normalizedResponse.includes(normalizedOriginal))
+    );
   const generic = !cleaned
     || /^claro,?\s*puedo ayudarte\.?$/i.test(cleaned)
     || /^gracias por tu mensaje\.?$/i.test(cleaned)
-    || normalizedResponse === normalizedMessage
+    || responseLooksLikeEcho
     || cleaned.length < 35;
 
   if (!generic) return cleaned;
 
   const topics = decision.topics;
+  const social = socialFallback(sourceMessage, topics);
+  if (social) return social;
+
   if (/El cliente respondio afirmativamente/i.test(message) && topics.includes('precio')) {
     return `Perfecto. Lo mejor es que pruebes primero la demo de *FullPOS* para ver ventas, inventario, caja y reportes funcionando en tu negocio.\n\nDescarga oficial:\n${DOWNLOAD_URL}\n\nSi luego decides activarlo, el plan minimo es de 3 meses por US$60 e incluye FullPOS Owner y soporte.`;
   }
@@ -354,5 +408,5 @@ export function strengthenClientResponse(message: string, responseText: string, 
     return 'FullPOS es un sistema de punto de venta para negocios que quieren controlar ventas, inventario, caja, clientes, compras, cotizaciones, gastos y reportes desde una computadora Windows. Trabaja sin Internet para vender y operar, incluye soporte, demo gratis por 5 dias y FullPOS Owner para que el dueno vea ventas, ganancias, inventario y cierres desde el celular. ¿Tu negocio es tienda, minimarket, ferreteria u otro tipo?';
   }
 
-  return cleaned || 'Hola, soy el asistente de FullPOS. Puedo ayudarte con demo, precios, instalacion, ventas, inventario, caja, reportes o FullPOS Owner. ¿Que te gustaria conocer primero?';
+  return 'Entendido. Puedo ayudarte con demo, precios, instalacion, ventas, inventario, caja, reportes, FullPOS Owner o enviarte capturas del sistema.';
 }
