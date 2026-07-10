@@ -192,7 +192,7 @@ export const FULLPOS_KNOWLEDGE = {
 };
 
 const topicMatchers: Array<[string, RegExp]> = [
-  ['precio', /\b(precio|costo|cu[aá]nto|vale|plan|planes|mensual|pagar|pago|licencia|renovar)\b/i],
+  ['precio', /\b(precio|precios|costo|cu[aá]nto|vale|plan|planes|mensual|mes|meses|pagar|pago|licencia|renovar)\b/i],
   ['demo', /\b(demo|prueba|probar|descarga|descargar|instalador|link|enlace|windows)\b/i],
   ['owner', /\b(owner|due[nñ]o|celular|telefono|m[oó]vil|desde mi casa|reportes desde|app)\b/i],
   ['ventas', /\b(vender|venta|factura|cobrar|ticket|comprobante|lector|codigo de barra|c[oó]digo de barra)\b/i],
@@ -318,7 +318,7 @@ export function strengthenClientResponse(message: string, responseText: string, 
   }
 
   if (topics.includes('owner')) {
-    return 'Con *FullPOS Owner* puedes ver desde tu celular ventas, ganancias, costos, inventario, productos, cierres de caja y resumen del negocio por dia, semana, quincena, mes o rango personalizado. Es ideal para supervisar aunque no estes en el negocio. ¿Quieres que te explique como se configura?';
+    return 'Con *FullPOS Owner* puedes ver desde tu celular ventas, ganancias, costos, inventario, productos, cierres de caja y resumen por dia, semana, quincena, mes o rango personalizado. La app se descarga desde FullPOS, en la parte de *Nube*: ahi escaneas el codigo desde el celular para descargarla y vincularla.';
   }
 
   if (topics.includes('ventas')) {
