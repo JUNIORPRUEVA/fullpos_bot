@@ -491,7 +491,21 @@ app.get('/config', (_req, res) => {
   res.json(configService.get());
 });
 
+app.get('/api/config', (_req, res) => {
+  res.json(configService.get());
+});
+
 app.post('/config', (req, res) => {
+  try {
+    const updated = configService.set(req.body);
+    res.json(updated);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_actualizando_config';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.post('/api/config', (req, res) => {
   try {
     const updated = configService.set(req.body);
     res.json(updated);
@@ -511,7 +525,29 @@ app.get('/conversations', async (_req, res) => {
   }
 });
 
+app.get('/api/conversations', async (_req, res) => {
+  try {
+    const conversations = await getConversationList();
+    res.json({ ok: true, conversations });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_conversaciones';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
 app.get('/conversations/:phone/messages', async (req, res) => {
+  try {
+    const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
+    const messages = await redis.getJsonList(`messages:${phone}`, 80);
+    const pauseSeconds = await redis.ttl(`pause:${phone}`);
+    res.json({ ok: true, phone, paused: pauseSeconds > 0, pauseSeconds: Math.max(0, pauseSeconds), messages });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_mensajes';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.get('/api/conversations/:phone/messages', async (req, res) => {
   try {
     const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
     const messages = await redis.getJsonList(`messages:${phone}`, 80);
@@ -535,6 +571,18 @@ app.post('/conversations/:phone/pause', async (req, res) => {
   }
 });
 
+app.post('/api/conversations/:phone/pause', async (req, res) => {
+  try {
+    const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
+    const minutes = Math.max(1, Math.min(1440, Number(req.body?.minutes || 30)));
+    await redis.set(`pause:${phone}`, 'manual', minutes * 60);
+    res.json({ ok: true, phone, paused: true, minutes });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_pausando';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
 app.post('/conversations/:phone/resume', async (req, res) => {
   try {
     const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
@@ -546,7 +594,39 @@ app.post('/conversations/:phone/resume', async (req, res) => {
   }
 });
 
+app.post('/api/conversations/:phone/resume', async (req, res) => {
+  try {
+    const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
+    await redis.delete(`pause:${phone}`);
+    res.json({ ok: true, phone, paused: false });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_reactivando';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
 app.post('/conversations/:phone/send-demo-button', async (req, res) => {
+  try {
+    const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
+    const body = 'Te dejo la demo oficial de FullPOS para Windows. Puedes descargarla, instalarla y probar ventas, inventario, caja y reportes.';
+    const url = 'https://github.com/JUNIORPRUEVA/fullpos-releases/releases/latest/download/FullPOS-Setup.exe';
+    const data = await metaWhatsapp.sendCtaUrl(phone, body, 'Descargar demo', url);
+    const accepted = data?.status >= 200 && data?.status < 300;
+    if (!accepted) {
+      const fallback = `${body}\n\nDescargar demo:\n${url}`;
+      const textData = await metaWhatsapp.sendText(phone, fallback);
+      await logConversationMessage({ phone, direction: 'out', text: fallback, type: 'text', provider: 'meta', status: textData?.status });
+      return res.status(textData?.status >= 200 && textData?.status < 300 ? 200 : 400).json({ ok: textData?.status >= 200 && textData?.status < 300, fallback: true, data: textData?.data });
+    }
+    await logConversationMessage({ phone, direction: 'out', text: `${body}\n[Boton: Descargar demo]`, type: 'button', provider: 'meta', status: data.status });
+    res.json({ ok: true, data: data.data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_boton_demo';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
+app.post('/api/conversations/:phone/send-demo-button', async (req, res) => {
   try {
     const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
     const body = 'Te dejo la demo oficial de FullPOS para Windows. Puedes descargarla, instalarla y probar ventas, inventario, caja y reportes.';
@@ -591,6 +671,30 @@ app.post('/conversations/:phone/send-image', async (req, res) => {
   }
 });
 
+app.post('/api/conversations/:phone/send-image', async (req, res) => {
+  try {
+    const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
+    const hint = String(req.body?.hint || req.body?.message || 'fullpos imagen').trim();
+    const asset = selectFullposImage(hint);
+    const imageUrl = publicAssetUrl(getPublicBaseUrl(), asset);
+    const data = await metaWhatsapp.sendImageLink(phone, imageUrl, asset.caption);
+    const accepted = data?.status >= 200 && data?.status < 300;
+    await logConversationMessage({
+      phone,
+      direction: 'out',
+      text: `${asset.caption}\n${imageUrl}`,
+      type: 'image',
+      provider: 'meta',
+      status: data?.status,
+      meta: { asset: asset.id, imageUrl, messageId: data?.data?.messages?.[0]?.id },
+    });
+    res.status(accepted ? 200 : 400).json({ ok: accepted, asset, imageUrl, data: data?.data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'error_enviando_imagen';
+    res.status(500).json({ ok: false, error: message });
+  }
+});
+
 app.post('/connect-webhook', async (_req, res) => {
   try {
     const config = configService.get();
@@ -612,7 +716,7 @@ app.post('/connect-webhook', async (_req, res) => {
   }
 });
 
-app.get('/status', async (_req, res) => {
+app.get(['/status', '/api/status'], async (_req, res) => {
   try {
     const config = configService.get();
     const state = config.whatsappProvider === 'meta'
@@ -1104,7 +1208,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-app.get('/health', (_req, res) => {
+app.get(['/health', '/api/health'], (_req, res) => {
   res.json({ ok: true, service: 'fullpos-agente-bot' });
 });
 
