@@ -8,7 +8,7 @@ import { OpenAIService } from './services/openai';
 import { WhatsAppService } from './services/whatsapp';
 import { MetaWhatsAppService } from './services/meta';
 import { ConfigService } from './services/config';
-import { buildKnowledgeContext } from './services/knowledge';
+import { buildKnowledgeContext, strengthenClientResponse } from './services/knowledge';
 
 dotenv.config();
 
@@ -177,7 +177,12 @@ async function buildAgentResponse(params: {
   };
 
   const agentReply = await openai.generateAgentReply(context);
-  const responseText = agentReply?.client_response || 'Gracias por tu mensaje.';
+  const responseText = strengthenClientResponse(
+    params.userMessage,
+    agentReply?.client_response || 'Gracias por tu mensaje.',
+    knowledgeContext,
+  );
+  agentReply.client_response = responseText;
 
   await redis.pushJson(memoryKey, { role: 'user', text: params.userMessage, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);
   await redis.pushJson(memoryKey, { role: 'assistant', text: responseText, at: new Date().toISOString() }, 12, 60 * 60 * 24 * 14);

@@ -293,3 +293,44 @@ export function buildKnowledgeContext(message: string, tipoMensaje: string, conf
     knowledge: pickKnowledge(topics),
   };
 }
+
+export function strengthenClientResponse(message: string, responseText: string, decision: KnowledgeDecision): string {
+  const cleaned = String(responseText || '').trim();
+  const generic = !cleaned
+    || /^claro,?\s*puedo ayudarte\.?$/i.test(cleaned)
+    || /^gracias por tu mensaje\.?$/i.test(cleaned)
+    || cleaned.length < 35;
+
+  if (!generic) return cleaned;
+
+  const topics = decision.topics;
+  if (topics.includes('precio')) {
+    return 'Claro. *FullPOS* tiene licencia minima de 3 meses: US$60. Tambien esta el plan de 6 meses por US$120 y 12 meses por US$240. Incluye FullPOS completo, FullPOS Owner, soporte, actualizaciones y sin cargos ocultos. ¿Quieres que te ayude con la demo o con la compra?';
+  }
+
+  if (topics.includes('demo')) {
+    return `Puedes probar *FullPOS* con la demo gratis por 5 dias. Descargalo aqui:\n${DOWNLOAD_URL}\n\nInstalas en Windows, creas tu negocio y pruebas ventas, inventario, caja y reportes. ¿Quieres que te guie con la instalacion?`;
+  }
+
+  if (topics.includes('owner')) {
+    return 'Con *FullPOS Owner* puedes ver desde tu celular ventas, ganancias, costos, inventario, productos, cierres de caja y resumen del negocio por dia, semana, quincena, mes o rango personalizado. Es ideal para supervisar aunque no estes en el negocio. ¿Quieres que te explique como se configura?';
+  }
+
+  if (topics.includes('ventas')) {
+    return 'Para hacer una venta en *FullPOS*: abre caja, entra a Ventas, busca o escanea el producto, agrega cantidad, revisa el total, elige forma de pago y cobra. Luego puedes imprimir o guardar el comprobante. ¿La venta seria en efectivo, tarjeta, transferencia o credito?';
+  }
+
+  if (topics.includes('inventario')) {
+    return 'En *FullPOS* puedes controlar productos, codigos, costos, precios, categorias, existencias, stock bajo, agotados y ajustes. Tambien ves el valor del inventario y la ganancia potencial. ¿Quieres agregar productos nuevos o revisar existencias?';
+  }
+
+  if (topics.includes('caja')) {
+    return 'En Caja puedes abrir el turno, registrar ventas, ingresos, gastos y movimientos, y al final hacer el cierre con el conteo del efectivo. Asi sabes si el dia cuadro correctamente. ¿Quieres que te guie con apertura o cierre de caja?';
+  }
+
+  if (decision.shouldUseDetailedAnswer || /\b(fullpos|sistema|punto de venta|informaci[oó]n|funciona)\b/i.test(message)) {
+    return 'FullPOS es un sistema de punto de venta para negocios que quieren controlar ventas, inventario, caja, clientes, compras, cotizaciones, gastos y reportes desde una computadora Windows. Trabaja sin Internet para vender y operar, incluye soporte, demo gratis por 5 dias y FullPOS Owner para que el dueno vea ventas, ganancias, inventario y cierres desde el celular. ¿Tu negocio es tienda, minimarket, ferreteria u otro tipo?';
+  }
+
+  return cleaned || 'Hola, soy el asistente de FullPOS. Puedo ayudarte con demo, precios, instalacion, ventas, inventario, caja, reportes o FullPOS Owner. ¿Que te gustaria conocer primero?';
+}
