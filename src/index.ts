@@ -143,6 +143,74 @@ async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function openAiErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || 'error_openai');
+}
+
+function isOpenAiQuotaError(error: unknown): boolean {
+  const message = openAiErrorMessage(error).toLowerCase();
+  return message.includes('429')
+    || message.includes('quota')
+    || message.includes('billing')
+    || message.includes('insufficient_quota');
+}
+
+function buildFallbackAgentReply(userMessage: string, topics: string[], error: unknown): any {
+  const text = userMessage.toLowerCase();
+  const wantsPrice = topics.includes('precio') || /\b(precio|plan|planes|cuesta|costo|licencia)\b/i.test(text);
+  const wantsDemo = topics.includes('demo') || /\b(demo|descarga|descargar|instalador|probar)\b/i.test(text);
+  const wantsImage = isAskingForImage(userMessage);
+  const wantsOwner = /\b(owner|dueñ|duen|app|celular|telefono|m[oó]vil)\b/i.test(text);
+  const greeting = /\b(hola|saludo|buenas|buenos|buenas tardes|buenos dias)\b/i.test(text);
+
+  let response = 'Claro. FullPOS es un sistema de punto de venta para controlar ventas, inventario, caja, clientes y reportes desde Windows. La demo te permite probar el sistema antes de comprar.';
+  let intent = 'informacion';
+  let requiredAction = 'responder_directo';
+
+  if (wantsPrice) {
+    intent = 'precio';
+    requiredAction = 'consultar_planes';
+    response = 'FullPOS tiene licencia mínima de 3 meses por US$60, 6 meses por US$120 y 12 meses por US$240. Incluye soporte y FullPOS Owner para ver datos desde el celular.';
+  } else if (wantsDemo) {
+    intent = 'solicitar_demo';
+    requiredAction = 'iniciar_demo';
+    response = 'Perfecto. Te puedo pasar la demo oficial de FullPOS para Windows para que pruebes ventas, inventario, caja y reportes antes de adquirir la licencia.';
+  } else if (wantsImage) {
+    intent = 'informacion';
+    requiredAction = 'consultar_recursos';
+    response = 'Claro, te envío una captura de FullPOS para que veas mejor cómo se maneja el sistema en operación.';
+  } else if (wantsOwner) {
+    intent = 'informacion';
+    response = 'FullPOS Owner está incluido. Desde FullPOS, en la parte de Nube, puedes escanear el código con el celular para descargar y vincular la app del dueño.';
+  } else if (greeting) {
+    intent = 'saludo';
+    response = 'Hola, con gusto te ayudo con FullPOS. Es un punto de venta para ventas, inventario, caja y reportes, ideal para organizar mejor el negocio.';
+  }
+
+  return {
+    intent,
+    project_slug: 'fullpos',
+    project_name: 'FullPOS',
+    client_status: 'unknown',
+    commercial_stage: wantsDemo ? 'demo_requested' : wantsPrice ? 'purchase_interest' : 'new',
+    client_response: response,
+    required_action: requiredAction,
+    resource_type: wantsDemo ? 'demo' : '',
+    resource_url: wantsDemo ? DEMO_DOWNLOAD_URL : '',
+    resource_title: wantsDemo ? 'Demo FullPOS para Windows' : '',
+    resource_platform: wantsDemo ? 'windows' : '',
+    response_channel: 'text',
+    should_update_lead: true,
+    should_create_followup: false,
+    followup_type: '',
+    followup_reason: '',
+    needs_human: false,
+    priority: 'normal',
+    fallback: true,
+    openai_error: openAiErrorMessage(error),
+  };
+}
+
 async function buildAgentResponse(params: {
   userMessage: string;
   tipoMensaje: string;
@@ -228,7 +296,14 @@ async function buildAgentResponse(params: {
     },
   };
 
-  const agentReply = await openai.generateAgentReply(context);
+  let agentReply: any;
+  try {
+    agentReply = await openai.generateAgentReply(context);
+  } catch (error) {
+    const message = openAiErrorMessage(error);
+    console.warn(`OpenAI no disponible, usando respuesta de respaldo: ${message}`);
+    agentReply = buildFallbackAgentReply(interpretedMessage, knowledgeContext.topics, error);
+  }
   const strongResponse = strengthenClientResponse(
     interpretedMessage,
     agentReply?.client_response || 'Gracias por tu mensaje.',
@@ -274,6 +349,7 @@ function shouldSendAudio(params: {
   knowledgeContext?: { shouldUseAudio?: boolean };
   agentReply?: any;
 }): boolean {
+  if (params.agentReply?.fallback === true || params.agentReply?.openai_error) return false;
   if (params.responseMode === 'audio') return true;
   if (params.responseMode === 'text') return false;
   return params.tipoMensaje === 'audio'
@@ -419,7 +495,7 @@ async function logConversationMessage(params: {
     status: params.status || '',
     meta: params.meta || {},
   };
-  await redis.pushJson(`messages:${phone}`, item, 80, 60 * 60 * 24 * 60);
+  await redis.pushJson(`messages:${phone}`, item, 500, 60 * 60 * 24 * 60);
   await redis.addToSet('conversations:phones', phone, 60 * 60 * 24 * 60);
   await redis.set(`conversation:last:${phone}`, JSON.stringify(item), 60 * 60 * 24 * 60);
 }
@@ -538,7 +614,7 @@ app.get('/api/conversations', async (_req, res) => {
 app.get('/conversations/:phone/messages', async (req, res) => {
   try {
     const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
-    const messages = await redis.getJsonList(`messages:${phone}`, 80);
+    const messages = await redis.getJsonList(`messages:${phone}`, 500);
     const pauseSeconds = await redis.ttl(`pause:${phone}`);
     res.json({ ok: true, phone, paused: pauseSeconds > 0, pauseSeconds: Math.max(0, pauseSeconds), messages });
   } catch (error) {
@@ -550,7 +626,7 @@ app.get('/conversations/:phone/messages', async (req, res) => {
 app.get('/api/conversations/:phone/messages', async (req, res) => {
   try {
     const phone = String(req.params.phone || '').replace(/[^0-9]/g, '');
-    const messages = await redis.getJsonList(`messages:${phone}`, 80);
+    const messages = await redis.getJsonList(`messages:${phone}`, 500);
     const pauseSeconds = await redis.ttl(`pause:${phone}`);
     res.json({ ok: true, phone, paused: pauseSeconds > 0, pauseSeconds: Math.max(0, pauseSeconds), messages });
   } catch (error) {
@@ -945,6 +1021,13 @@ app.post('/meta/webhook', async (req, res) => {
             } catch (error) {
               const mediaError = error instanceof Error ? error.message : 'error_media_meta';
               console.warn(`No se pudo procesar media Meta: ${mediaError}`);
+              if (!userMessage) {
+                userMessage = tipoMensaje === 'audio'
+                  ? 'El cliente envio una nota de voz, pero no se pudo transcribir. Responde de forma amable pidiendo que escriba el detalle principal si necesita ayuda con FullPOS.'
+                  : tipoMensaje === 'image'
+                    ? 'El cliente envio una imagen, pero no se pudo analizar. Responde de forma amable pidiendo el detalle principal si necesita ayuda con FullPOS.'
+                    : 'El cliente envio un video, pero no se pudo analizar. Responde de forma amable pidiendo el detalle principal si necesita ayuda con FullPOS.';
+              }
             }
           }
 
@@ -1112,6 +1195,13 @@ app.post('/webhook', async (req, res) => {
       } catch (error) {
         const mediaError = error instanceof Error ? error.message : 'error_media';
         console.warn(`No se pudo procesar media: ${mediaError}`);
+        if (!userMessage) {
+          userMessage = tipoMensaje === 'audio'
+            ? 'El cliente envio una nota de voz, pero no se pudo transcribir. Responde de forma amable pidiendo que escriba el detalle principal si necesita ayuda con FullPOS.'
+            : tipoMensaje === 'image'
+              ? 'El cliente envio una imagen, pero no se pudo analizar. Responde de forma amable pidiendo el detalle principal si necesita ayuda con FullPOS.'
+              : 'El cliente envio un video, pero no se pudo analizar. Responde de forma amable pidiendo el detalle principal si necesita ayuda con FullPOS.';
+        }
       }
     }
 
